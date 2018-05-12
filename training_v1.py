@@ -4,10 +4,10 @@ import cv2
 import numpy as np
 
 
-h5_file = h5py.File('patchdata_64x64.h5', 'r');
+h5_file = h5py.File('data/images.h5', 'r');
 
 dataset_name = 'liberty';
-dataset_infopath = dataset_name + '/info.txt';
+dataset_infopath = 'data/' + dataset_name + '.txt';
 
 raw_dataset = h5_file[dataset_name];
 
@@ -41,7 +41,7 @@ class Dataset(object):
         
         # TODO: some shuffling of the data?
         
-        if self.idx + self.batch_size < self.N: # TODO: END CONDITION
+        if self.idx + self.batch_size < self.N: # TODO: proper end condition?
             batch_X = self.X[self.idx:self.idx+self.batch_size];
             batch_y = self.y[self.idx:self.idx+self.batch_size];
             

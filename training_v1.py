@@ -32,6 +32,9 @@ class Dataset(object):
       batch_X = self.X[self.idx:self.idx+self.batch_size]
       batch_y = self.y[self.idx:self.idx+self.batch_size]
       
+      
+      
+      
       # TODO: process / return pairs!
       
       self.idx += self.batch_size

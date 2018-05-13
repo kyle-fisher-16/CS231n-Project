@@ -9,7 +9,7 @@ import numpy.random as rng
 import numpy as np
 import os
 import h5py
-from training_v1 import Dataset
+from dataset import Dataset
 
 # Global Constants
 IMG_W = 64;

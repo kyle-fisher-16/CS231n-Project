@@ -19,15 +19,23 @@ import os
 #  values=rng.normal(loc=0.5,scale=1e-2,size=shape)
 #  return K.variable(values,name=name)
 
+img_W = 7;
+img_H = 7;
+input_shape = (2,img_W,img_H)
+siamese_input = Input(input_shape)
+batch_sz = 10;
 
-input_shape = (1,)
-left_input = Input(input_shape)
-right_input = Input(input_shape)
+left_input = Lambda(lambda x: x[:, 0, :, :],
+                    output_shape=(batch_sz,img_W,img_H),
+                    )(siamese_input);
+
+right_input = Lambda(lambda x: x[:, 1, :, :],
+                     output_shape=(batch_sz,img_W,img_H),
+                     )(siamese_input);
 
 # make the network
 convnet = Sequential()
 convnet.add(Dense(3, activation='relu', input_shape=input_shape, kernel_initializer=Constant(value=1), bias_initializer=Constant(value=0)))
-
 
 # encode each of the two inputs into a vector with the convnet
 encoded_l = convnet(left_input)
@@ -46,16 +54,20 @@ def l2_loss(y_true, y_pred):
   return K.sqrt(y_pred);
 
 # instantiate the network
-siamese_net = Model(output=dist_sq, inputs=[left_input,right_input])
+siamese_net = Model(output=dist_sq, inputs=siamese_input)
 
-optimizer = Adam(0.06) # default was 0.00006
+optimizer = Adam(0.006) # default was 0.00006
 siamese_net.compile(loss=l2_loss,optimizer=optimizer)
 
-fake_data_left = np.array([1.0])
-fake_data_right = np.array([3.0])
-fake_labels = np.array([1], dtype="uint8")
+N = 100;
 
-# network_out = siamese_net.predict(x=[fake_data_left, fake_data_right])
-# loss_output = siamese_net.evaluate(x=[fake_data_left, fake_data_right], y=fake_labels)
-siamese_net.fit(x=[fake_data_left, fake_data_right], y=fake_labels, batch_size=1, epochs=10);
+fake_data = 1.0 * np.ones((N, 2, img_W, img_H))
+fake_data[:,0,:, :] = 10.0;
+fake_labels = np.zeros((N,),dtype="uint8")
+
+#network_out = siamese_net.predict(x=fake_data)
+#print network_out
+#loss_output = siamese_net.evaluate(x=[fake_data], y=fake_labels)
+#print loss_output
+siamese_net.fit(x=fake_data, y=fake_labels, batch_size=batch_sz, epochs=30);
 

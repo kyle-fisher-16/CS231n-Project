@@ -1,4 +1,4 @@
-from keras.layers import Input, Conv2D, Lambda, merge, Dense, dot, Flatten,MaxPooling2D
+from keras.layers import Input, Conv2D, Lambda, Flatten, merge, multiply, maximum, subtract, add, Dense, dot, Flatten,MaxPooling2D
 from keras.models import Model, Sequential
 from keras.regularizers import l2
 from keras.initializers import Constant
@@ -8,66 +8,76 @@ from keras.losses import binary_crossentropy
 import numpy.random as rng
 import numpy as np
 import os
+import h5py
+from training_v1 import Dataset
 
-#def W_init(shape,name=None):
-#  """Initialize weights as in paper"""
-#  values = rng.normal(loc=0,scale=1e-2,size=shape)
-#  return K.variable(values,name=name)
-##//TODO: figure out how to initialize layer biases in keras.
-#def b_init(shape,name=None):
-#  """Initialize bias as in paper"""
-#  values=rng.normal(loc=0.5,scale=1e-2,size=shape)
-#  return K.variable(values,name=name)
+# Global Constants
+IMG_W = 64;
+IMG_H = 64;
 
-img_W = 7;
-img_H = 7;
-input_shape = (2,img_W,img_H)
-siamese_input = Input(input_shape)
+# ====== HYPERPARAMS ======
 batch_sz = 10;
+num_epochs = 10;
 
-left_input = Lambda(lambda x: x[:, 0, :, :],
-                    output_shape=(batch_sz,img_W,img_H),
-                    )(siamese_input);
 
-right_input = Lambda(lambda x: x[:, 1, :, :],
-                     output_shape=(batch_sz,img_W,img_H),
-                     )(siamese_input);
+# ====== LOAD DATA ======
+data = h5py.File('data/liberty.h5', 'r')
+training_dset = Dataset(data, batch_size=batch_sz);
 
-# make the network
+
+# ====== NETWORK ARCHITECTURE ======
 convnet = Sequential()
-convnet.add(Dense(3, activation='relu', input_shape=input_shape, kernel_initializer=Constant(value=1), bias_initializer=Constant(value=0)))
+convnet.add(Flatten(input_shape=(IMG_W, IMG_H)))
+convnet.add(Dense(3, activation='relu', input_shape=(2,IMG_W,IMG_H), kernel_initializer='random_uniform', bias_initializer=Constant(value=0)))
 
-# encode each of the two inputs into a vector with the convnet
+
+# ====== SIAMESE NETWORK ======
+siamese_input = Input((2,IMG_W,IMG_H))
+left_input = Lambda(lambda x: x[:, 0, :, :], output_shape=(batch_sz,IMG_W,IMG_H),)(siamese_input);
+right_input = Lambda(lambda x: x[:, 1, :, :], output_shape=(batch_sz,IMG_W,IMG_H),)(siamese_input);
 encoded_l = convnet(left_input)
 encoded_r = convnet(right_input)
-# merge two encoded inputs with the l1 distance between them
+# calculate the loss
 abs_diff_lambda = lambda x: K.abs(x[0]-x[1])
 abs_diff = merge([encoded_l, encoded_r], mode = abs_diff_lambda, output_shape=lambda x: x[0])
 dist_sq = dot([abs_diff, abs_diff], axes=1, normalize=False)
 
-# loss function
-def l2_loss(y_true, y_pred):
-  # y_true should be boolean (int)... 0 if non-corresponding, 1 if matched.
-  # y_pred is distance squared from siamese network
+
+# ====== LOSS FUNCTION ======
+def loss_func(y_true, y_pred):
+  # y_true - should be boolean (int)... 0 if non-corresponding, 1 if matched.
+  # y_pred - is distance squared from siamese network
+  # Here, we calculate:
+  # (y_true * dist) + (1 - ytrue) * max(0, C - dist)
   
-  # todo: piece-wise loss from the paper
-  return K.sqrt(y_pred);
+  # y_true == 1:
+  dist = K.sqrt(y_pred);
+  match_term = multiply([dist, y_true]); # y_true * dist
+  
+  # y_true == 0:
+  C = K.constant([10.0]); # C = 10
+  zero_const = K.constant([0.0]); # zero = 0
+  one_const = K.constant([1.0]); # one = 1
+  c_minus_dist = subtract([C, dist]); # C - dist
+  temp1 = maximum([zero_const, c_minus_dist]); # max(0, C - dist)
+  nonmatch_term_coeff = subtract([one_const, y_true]); # (1 - ytrue)
+  nonmatch_term = multiply([nonmatch_term_coeff, temp1]); # (1 - ytrue) * max(0, C - dist)
+  
+  return add([match_term, nonmatch_term]);
 
-# instantiate the network
+
+# ====== TRAINING ======
 siamese_net = Model(output=dist_sq, inputs=siamese_input)
+optimizer = Adam(0.01) # default was 0.00006
+siamese_net.compile(loss=loss_func,optimizer=optimizer)
+epoch = 1;
+for X_batch, y_batch in training_dset:
+  # Run the graph on a batch of training data; recall that asking
+  # TensorFlow to evaluate loss will cause an SGD step to happen.
+  loss = siamese_net.train_on_batch(x=X_batch, y=y_batch)
+  print 'Epoch #', epoch, ', loss=', loss
+  epoch += 1
+  if epoch > num_epochs:
+    break;
 
-optimizer = Adam(0.006) # default was 0.00006
-siamese_net.compile(loss=l2_loss,optimizer=optimizer)
-
-N = 100;
-
-fake_data = 1.0 * np.ones((N, 2, img_W, img_H))
-fake_data[:,0,:, :] = 10.0;
-fake_labels = np.zeros((N,),dtype="uint8")
-
-#network_out = siamese_net.predict(x=fake_data)
-#print network_out
-#loss_output = siamese_net.evaluate(x=[fake_data], y=fake_labels)
-#print loss_output
-siamese_net.fit(x=fake_data, y=fake_labels, batch_size=batch_sz, epochs=30);
 

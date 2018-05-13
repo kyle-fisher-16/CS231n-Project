@@ -42,7 +42,7 @@ class Dataset(object):
         grpIdx = np.random.choice(self.groupIdx).astype(str)
         # generate distinct patch pair
         patchIdx = xrange(self.data[grpIdx].shape[0])
-        pchIdx = np.random.choice(patchIdx, 2)
+        pchIdx = np.random.choice(patchIdx, size=2, replace=False)
         # assemble example
         example = np.zeros((2, 64, 64))
         example[0] = np.reshape(data[grpIdx][pchIdx[0]], (64, 64))
@@ -52,7 +52,7 @@ class Dataset(object):
 
     def generateNegativeExample(self):
         # generate random 3D index pair
-        grpIdx = np.random.choice(self.groupIdx, 2).astype(str)
+        grpIdx = np.random.choice(self.groupIdx, size=2, replace=False).astype(str)
         # generate random patch index pair
         pchSize = (self.data[grpIdx[0]].shape[0],
                    self.data[grpIdx[1]].shape[0])
@@ -65,7 +65,9 @@ class Dataset(object):
         return example      
 
 
-if __name__ == '__main__':
-    train_dset = Dataset(data, batch_size=5)
-    X, y = train_dset.next()
+#if __name__ == '__main__':
+#    train_dset = Dataset(data, batch_size=5)
+#    X, y = train_dset.next()
+#    print X[0, 0, 50, 50]
+#    print X[0, 1, 50, 50]
 

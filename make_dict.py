@@ -20,10 +20,10 @@ for i in xrange(1, raw_dataset.shape[0]):
     new_patch_idx = raw_info[i]
     if new_patch_idx != prev_patch_idx:
         patch_key = str(int(prev_patch_idx));
-        dset = out_file.create_dataset(patch_key, data=patch_group.copy())
+        dset = out_file.create_dataset(patch_key, data=patch_group.copy(), dtype='uint8')
         patch_group = np.zeros((0, 4096))
     patch_group = np.vstack((patch_group, raw_dataset[i]))
     prev_patch_idx = new_patch_idx
 
 patch_key = str(int(prev_patch_idx));
-dset = out_file.create_dataset(patch_key, data=patch_group.copy())
+dset = out_file.create_dataset(patch_key, data=patch_group, dtype='uint8')

@@ -1,10 +1,11 @@
-from keras.layers import Input, Conv2D, Lambda, Flatten, merge, multiply, maximum, subtract, add, Dense, dot, Flatten,MaxPooling2D
-from keras.models import Model, Sequential
-from keras.regularizers import l2
-from keras.initializers import Constant
-from keras import backend as K
-from keras.optimizers import SGD,Adam
-from keras.losses import binary_crossentropy
+import tensorflow as tf
+from tensorflow.python.keras.layers import Input, Conv2D, Lambda, Flatten, multiply, maximum, add, Dense, dot, Flatten,MaxPooling2D
+from tensorflow.python.keras.models import Model, Sequential
+from tensorflow.python.keras.regularizers import l2
+from tensorflow.python.keras.initializers import Constant
+from tensorflow.python.keras import backend as K
+from tensorflow.python.keras.optimizers import SGD,Adam
+from tensorflow.python.keras.losses import binary_crossentropy
 import numpy.random as rng
 import numpy as np
 import os
@@ -31,8 +32,8 @@ training_dset = Dataset(data, batch_size=batch_sz);
 convnet = Sequential()
 convnet.add(Flatten(input_shape=(IMG_W, IMG_H)))
 # convnet.add(keras.layers.BatchNormalization(axis=1, batch_input_shape=(IMG_W*IMG_H,)))
-convnet.add(Dense(1, activation='relu', input_shape=(IMG_W*IMG_H,),      kernel_initializer='random_uniform', bias_initializer=Constant(value=0),
-kernel_regularizer=keras.regularizers.l2(0.1), bias_regularizer=keras.regularizers.l2(0.1)))
+convnet.add(Dense(2, activation='relu', input_shape=(IMG_W*IMG_H,),      kernel_initializer='random_uniform', bias_initializer=Constant(value=0),
+kernel_regularizer=tf.keras.regularizers.l2(0.1), bias_regularizer=tf.keras.regularizers.l2(0.1)))
 
 
 # ====== SIAMESE NETWORK ======
@@ -44,9 +45,8 @@ right_input = Lambda(lambda x: x[:, 1, :, :], output_shape=(batch_sz,IMG_W,IMG_H
 encoded_l = convnet(left_input)
 encoded_r = convnet(right_input)
 # calculate the loss
-abs_diff_lambda = lambda x: K.abs(x[0]-x[1])
-abs_diff = merge([encoded_l, encoded_r], mode = abs_diff_lambda, output_shape=lambda x: x[0])
-dist_sq = dot([abs_diff, abs_diff], axes=1, normalize=False)
+encoded_diff = tf.subtract(encoded_l, encoded_r)
+dist_sq = tf.keras.layers.dot([encoded_diff, encoded_diff], axes=1)
 
 
 # ====== LOSS FUNCTION ======
@@ -71,9 +71,23 @@ def loss_func(y_true, y_pred):
 
   return add([match_term, nonmatch_term]);
 
+class SiameseNet(tf.keras.Model):
+    def __init__(self):
+        super().__init__()
+        self.splitLeft = Lambda(lambda x: x[:, 0, :, :], output_shape=(batch_sz,IMG_W,IMG_H),)
+        self.splitRight = Lambda(lambda x: x[:, 1, :, :], output_shape=(batch_sz,IMG_W,IMG_H),)
+    def call(self, x, training=None):
+        xL = self.splitLeft(x)
+        xR = self.splitRight(x)
+        xL = convnet(xL)
+        xR = convnet(xR)
+        x = tf.subtract(xL, xR)
+        x = tf.keras.layers.dot([x, x], axes=1)
+        return x
+        
 
 # ====== TRAINING ======
-siamese_net = Model(output=dist_sq, inputs=siamese_input)
+siamese_net = Model(outputs=dist_sq, inputs=siamese_input)
 optimizer = SGD(0.000001) # Adam(0.01) # default was 0.00006
 siamese_net.compile(loss=loss_func,optimizer=optimizer)
 weights = siamese_net.get_weights()
@@ -91,5 +105,5 @@ for X_batch, y_batch in training_dset:
   print "weights at step ", step, ": ", weights
   print 'Step #', step, ', loss=', loss
   step += 1
-  if step > 5: # num_steps:
+  if step > 10: # num_steps:
     break;

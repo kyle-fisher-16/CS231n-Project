@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 import tensorflow as tf
 from tensorflow.python.keras.layers import Input, Conv2D, Lambda, Flatten, multiply, maximum, add, Dense, dot, Flatten,MaxPooling2D
 from tensorflow.python.keras.models import Model, Sequential
@@ -20,7 +22,7 @@ IMG_W = 64;
 IMG_H = 64;
 
 # ====== HYPERPARAMS ======
-batch_sz = 100;
+batch_sz = 10;
 num_steps = 100;
 
 
@@ -34,9 +36,10 @@ def loss_func(y_true, y_pred):
     # y_pred - is distance squared from siamese network
     # Here, we calculate:
     # (y_true * dist) + (1 - ytrue) * max(0, C - dist)
-
     # y_true == 1:
     dist = tf.sqrt(y_pred);
+    #loss_val = tf.cond(y_true > 0.5, lambda: dist, lambda: tf.maximum(0.0, tf.subtract(10.0, dist)))
+    
     match_term = multiply([dist, y_true]); # y_true * dist
     match_term = tf.reshape(match_term, (batch_sz,));
     
@@ -52,7 +55,7 @@ def loss_func(y_true, y_pred):
     
     # add the two losses
     loss_val = tf.add(match_term, nonmatch_term);
-
+    loss_val = tf.reduce_mean(loss_val)
     return loss_val
 
 class SiameseNet(tf.keras.Model):
@@ -60,7 +63,7 @@ class SiameseNet(tf.keras.Model):
     def __init__(self):
         super(SiameseNet, self).__init__()
         initializer = tf.variance_scaling_initializer(scale=2.0)
-        self.conv1 = tf.layers.Conv2D(filters = 1, kernel_size = (3, 3), strides = (2,2), padding = "SAME", activation = tf.nn.relu, use_bias = True, kernel_initializer = initializer)
+        self.conv1 = tf.layers.Conv2D(filters = 1, kernel_size = (3, 3), strides = (1,1), padding = "SAME", activation = tf.nn.relu, use_bias = True, kernel_initializer = initializer)
     
     # apply convnet; operates only on one of the left/right channels at a time.
     def apply_convnet(self, x):
@@ -85,10 +88,12 @@ class SiameseNet(tf.keras.Model):
         xL = self.apply_convnet(xL)
         xR = self.apply_convnet(xR)
 
+#        xL = tf.Print(xL, [xL], summarize = batch_sz)
+
         # compute distance squared; we will pass this to the loss function
         dist_sq = tf.subtract(xL, xR);
         dist_sq = tf.multiply(dist_sq, dist_sq);
-        dist_sq = tf.reduce_sum(dist_sq, axis=1, keepdims=True);
+        dist_sq = tf.reduce_sum(dist_sq, axis=1)#, keepdims=True);
         return dist_sq
 
 # ====== TRAINING ======
@@ -99,7 +104,7 @@ with tf.device('/cpu:0'):
     y = tf.placeholder(tf.float32, [None])
     scores = SiameseNet()(x);
     loss_calc = loss_func(y, scores);
-    optimizer = tf.train.GradientDescentOptimizer(1e-3);
+    optimizer = tf.train.GradientDescentOptimizer(5e-3);
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
         train_op = optimizer.minimize(loss_calc)
@@ -109,23 +114,24 @@ with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     step = 1;
     for X_batch, y_batch in training_dset:
-
+        X_batch = np.asarray(X_batch, dtype="float32") / 256.0;
+        X_batch -= 0.5;
         feed_dict = {x: X_batch, y: y_batch}
         
-        loss_calc = tf.Print(loss_calc,
-                             [tf.gradients(loss_calc, tf.trainable_variables()[0])],
-                             summarize=10
-                             )
+#        loss_calc = tf.Print(loss_calc,
+#                             [tf.gradients(loss_calc, tf.trainable_variables()[1])],
+#                             summarize=10
+#                             )
         
         loss_output, _ = sess.run([loss_calc, train_op], feed_dict=feed_dict)
-        print np.mean(loss_output)
+#        print np.mean(loss_output)
         
         
 
 
 
         # next step
-        num_steps = 5
+        num_steps = 20
         if step > num_steps:
             break;
         step += 1

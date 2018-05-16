@@ -1,0 +1,6 @@
+add data mining for hard examples
+fix normalization (centering with gaussian kernel over 5x5 local region
+add regularization
+add sparse random connections
+add connection to previous layer features
+fix pooling (l2)

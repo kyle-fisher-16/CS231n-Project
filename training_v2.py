@@ -34,7 +34,7 @@ def loss_func(y_true, y_pred):
     # y_true == 0:
     one_const = tf.constant(1.0, shape=(batch_sz,)); # one = 1
     nonmatch_term_coeff = tf.subtract(one_const, y_true); # (1 - ytrue)
-    C = tf.constant(10.0); # C = 10
+    C = tf.constant(5.0); 
     zero_const = tf.constant(0.0, shape=(batch_sz,)); # zero = 0
     c_minus_dist = tf.subtract(C, dist); # C - dist
     c_minus_dist = tf.reshape(c_minus_dist, (batch_sz,));
@@ -51,14 +51,27 @@ class SiameseNet(tf.keras.Model):
     def __init__(self):
         super(SiameseNet, self).__init__()
         initializer = tf.variance_scaling_initializer(scale=2.0)
-        self.conv1 = tf.layers.Conv2D(filters = 1, kernel_size = (3, 3), strides = (1,1), padding = "SAME", activation = tf.nn.relu, use_bias = True, kernel_initializer = initializer)
-    
+        self.conv1 = tf.layers.Conv2D(filters = 32, kernel_size = (7, 7), strides = (2, 2), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        self.pool1 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
+        self.norm1 = tf.layers.BatchNormalization(axis = 0, momentum = 0.99, epsilon = 1.0E-7)
+        
+        self.conv2 = tf.layers.Conv2D(filters = 64, kernel_size = (6, 6), strides = (3, 3), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        self.pool2 = tf.layers.MaxPooling2D(pool_size = (3, 3), padding = "SAME", strides = (3, 3))
+        self.norm2 = tf.layers.BatchNormalization(axis = 0, momentum = 0.99, epsilon = 1.0E-7)
+        
+        self.conv3 = tf.layers.Conv2D(filters = 128, kernel_size = (5, 5), strides = (4, 4), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        self.pool3 = tf.layers.MaxPooling2D(pool_size = (4, 4), padding = "SAME", strides = (4, 4))
+        self.norm3 = tf.layers.BatchNormalization(axis = 0, momentum = 0.99, epsilon = 1.0E-7)
     # apply convnet; operates only on one of the left/right channels at a time.
     def apply_convnet(self, x):
 
         # the actual network architecture:
         x_out = self.conv1(x)
-        
+        x_out = self.pool1(x_out)
+        x_out = self.norm1(x_out)
+        x_out = self.conv2(x_out)
+        x_out = self.pool2(x_out)
+        x_out = self.norm2(x_out)
         # flatten because at the end we want a single descriptor per input
         x_out = tf.layers.flatten(x_out);
         return x_out;
@@ -102,8 +115,6 @@ with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     step = 1;
     for X_batch, y_batch in training_dset:
-        X_batch = np.asarray(X_batch, dtype="float32") / 256.0;
-        X_batch -= 0.5;
         feed_dict = {x: X_batch, y: y_batch}
         
 #        loss_calc = tf.Print(loss_calc,
@@ -112,15 +123,15 @@ with tf.Session() as sess:
 #                             )
         
         loss_output, _ = sess.run([loss_calc, train_op], feed_dict=feed_dict)
-        print 'Step', step, ' - Loss', loss_output
+
+        print np.mean(loss_output)
         
         
 
 
 
         # next step
-        num_steps = 20
-        if step >= num_steps:
+        if step > num_steps:
             break;
         step += 1
 

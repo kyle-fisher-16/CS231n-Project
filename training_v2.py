@@ -1,10 +1,12 @@
-from keras.layers import Input, Conv2D, Lambda, Flatten, merge, multiply, maximum, subtract, add, Dense, dot, Flatten,MaxPooling2D
-from keras.models import Model, Sequential
-from keras.regularizers import l2
-from keras.initializers import Constant
-from keras import backend as K
-from keras.optimizers import SGD,Adam
-from keras.losses import binary_crossentropy
+import tensorflow as tf
+from tensorflow.python.keras.layers import Input, Conv2D, Lambda, Flatten, multiply, maximum, add, Dense, dot, Flatten,MaxPooling2D
+from tensorflow.python.keras.models import Model, Sequential
+from tensorflow.python.keras.regularizers import l2
+from tensorflow.python.keras.initializers import Constant
+from tensorflow.python.keras import backend as K
+from tensorflow.python.keras.optimizers import SGD,Adam
+from tensorflow.python.keras.losses import binary_crossentropy
+
 import numpy.random as rng
 import numpy as np
 import os
@@ -18,78 +20,113 @@ IMG_W = 64;
 IMG_H = 64;
 
 # ====== HYPERPARAMS ======
-batch_sz = 10;
-num_steps = 10;
+batch_sz = 100;
+num_steps = 100;
 
 
 # ====== LOAD DATA ======
 data = h5py.File('data/liberty.h5', 'r')
 training_dset = Dataset(data, batch_size=batch_sz);
 
-
-# ====== NETWORK ARCHITECTURE ======
-convnet = Sequential()
-convnet.add(Flatten(input_shape=(IMG_W, IMG_H)))
-# convnet.add(keras.layers.BatchNormalization(axis=1, batch_input_shape=(IMG_W*IMG_H,)))
-convnet.add(Dense(1, activation='relu', input_shape=(IMG_W*IMG_H,),      kernel_initializer='random_uniform', bias_initializer=Constant(value=0),
-kernel_regularizer=keras.regularizers.l2(0.1), bias_regularizer=keras.regularizers.l2(0.1)))
-
-
-# ====== SIAMESE NETWORK ======
-siamese_input = Input((2,IMG_W,IMG_H))
-norm_input = siamese_input
-# norm_input = keras.layers.BatchNormalization()(siamese_input)
-left_input = Lambda(lambda x: x[:, 0, :, :], output_shape=(batch_sz,IMG_W,IMG_H),)(norm_input);
-right_input = Lambda(lambda x: x[:, 1, :, :], output_shape=(batch_sz,IMG_W,IMG_H),)(norm_input);
-encoded_l = convnet(left_input)
-encoded_r = convnet(right_input)
-# calculate the loss
-abs_diff_lambda = lambda x: K.abs(x[0]-x[1])
-abs_diff = merge([encoded_l, encoded_r], mode = abs_diff_lambda, output_shape=lambda x: x[0])
-dist_sq = dot([abs_diff, abs_diff], axes=1, normalize=False)
-
-
 # ====== LOSS FUNCTION ======
 def loss_func(y_true, y_pred):
-  # y_true - should be boolean (int)... 0 if non-corresponding, 1 if matched.
-  # y_pred - is distance squared from siamese network
-  # Here, we calculate:
-  # (y_true * dist) + (1 - ytrue) * max(0, C - dist)
+    # y_true - should be boolean (int)... 0 if non-corresponding, 1 if matched.
+    # y_pred - is distance squared from siamese network
+    # Here, we calculate:
+    # (y_true * dist) + (1 - ytrue) * max(0, C - dist)
 
-  # y_true == 1:
-  dist = K.sqrt(y_pred);
-  match_term = multiply([dist, y_true]); # y_true * dist
+    # y_true == 1:
+    dist = tf.sqrt(y_pred);
+    match_term = multiply([dist, y_true]); # y_true * dist
+    match_term = tf.reshape(match_term, (batch_sz,));
+    
+    # y_true == 0:
+    one_const = tf.constant(1.0, shape=(batch_sz,)); # one = 1
+    nonmatch_term_coeff = tf.subtract(one_const, y_true); # (1 - ytrue)
+    C = tf.constant(10.0); # C = 10
+    zero_const = tf.constant(0.0, shape=(batch_sz,)); # zero = 0
+    c_minus_dist = tf.subtract(C, dist); # C - dist
+    c_minus_dist = tf.reshape(c_minus_dist, (batch_sz,));
+    temp1 = tf.maximum(zero_const, c_minus_dist); # max(0, C - dist)
+    nonmatch_term = tf.multiply(nonmatch_term_coeff, temp1); # (1 - ytrue) * max(0, C - dist)
+    
+    # add the two losses
+    loss_val = tf.add(match_term, nonmatch_term);
 
-  # y_true == 0:
-  C = K.constant([10.0]); # C = 10
-  zero_const = K.constant([0.0]); # zero = 0
-  one_const = K.constant([1.0]); # one = 1
-  c_minus_dist = subtract([C, dist]); # C - dist
-  temp1 = maximum([zero_const, c_minus_dist]); # max(0, C - dist)
-  nonmatch_term_coeff = subtract([one_const, y_true]); # (1 - ytrue)
-  nonmatch_term = multiply([nonmatch_term_coeff, temp1]); # (1 - ytrue) * max(0, C - dist)
+    return loss_val
 
-  return add([match_term, nonmatch_term]);
+class SiameseNet(tf.keras.Model):
 
+    def __init__(self):
+        super(SiameseNet, self).__init__()
+        initializer = tf.variance_scaling_initializer(scale=2.0)
+        self.conv1 = tf.layers.Conv2D(filters = 1, kernel_size = (3, 3), strides = (2,2), padding = "SAME", activation = tf.nn.relu, use_bias = True, kernel_initializer = initializer)
+    
+    # apply convnet; operates only on one of the left/right channels at a time.
+    def apply_convnet(self, x):
+
+        # the actual network architecture:
+        x_out = self.conv1(x)
+        
+        # flatten because at the end we want a single descriptor per input
+        x_out = tf.layers.flatten(x_out);
+        return x_out;
+    
+    # execute the siamese net
+    def call(self, x, training=None):
+        xL = tf.slice(x, [0, 0, 0, 0], [batch_sz, 1, IMG_W, IMG_H]);
+        xR = tf.slice(x, [0, 1, 0, 0], [batch_sz, 1, IMG_W, IMG_H]);
+        
+        # for conv2d, we need the dims to be ordered (batch_sz, img_w, img_h, channel)
+        xL = tf.transpose(xL, [0, 2, 3, 1])
+        xR = tf.transpose(xR, [0, 2, 3, 1])
+
+        # Convnet
+        xL = self.apply_convnet(xL)
+        xR = self.apply_convnet(xR)
+
+        # compute distance squared; we will pass this to the loss function
+        dist_sq = tf.subtract(xL, xR);
+        dist_sq = tf.multiply(dist_sq, dist_sq);
+        dist_sq = tf.reduce_sum(dist_sq, axis=1, keepdims=True);
+        return dist_sq
 
 # ====== TRAINING ======
-siamese_net = Model(output=dist_sq, inputs=siamese_input)
-optimizer = SGD(0.000001) # Adam(0.01) # default was 0.00006
-siamese_net.compile(loss=loss_func,optimizer=optimizer)
-weights = siamese_net.get_weights()
-print "num weights: ", len(weights)
-# print weights[0].shape
-# print weights[4].shape, weights[5].shape
-print "init weights: ", weights
-step = 1;
-for X_batch, y_batch in training_dset:
+# Construct computational graph
+tf.reset_default_graph()
+with tf.device('/cpu:0'):
+    x = tf.placeholder(tf.float32, [None, 2, IMG_W, IMG_H])
+    y = tf.placeholder(tf.float32, [None])
+    scores = SiameseNet()(x);
+    loss_calc = loss_func(y, scores);
+    optimizer = tf.train.GradientDescentOptimizer(1e-3);
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        train_op = optimizer.minimize(loss_calc)
 
-  # Run the graph on a batch of training data; recall that asking
-  # TensorFlow to evaluate loss will cause an SGD step to happen.
-  loss = siamese_net.train_on_batch(x=X_batch, y=y_batch)
-  weights = siamese_net.get_weights()
-  print "weights at step ", step, ": ", weights
-  print 'Step #', step, ', loss=', loss
-  step += 1
-  if step > 5: # num_steps:
-    break;
+# Run computational graph
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    step = 1;
+    for X_batch, y_batch in training_dset:
+
+        feed_dict = {x: X_batch, y: y_batch}
+        
+        loss_calc = tf.Print(loss_calc,
+                             [tf.gradients(loss_calc, tf.trainable_variables()[0])],
+                             summarize=10
+                             )
+        
+        loss_output, _ = sess.run([loss_calc, train_op], feed_dict=feed_dict)
+        print np.mean(loss_output)
+        
+        
+
+
+
+        # next step
+        num_steps = 5
+        if step > num_steps:
+            break;
+        step += 1
+

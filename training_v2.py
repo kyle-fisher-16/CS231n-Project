@@ -1,28 +1,16 @@
-#!/usr/bin/python
-
 import tensorflow as tf
-from tensorflow.python.keras.layers import Input, Conv2D, Lambda, Flatten, multiply, maximum, add, Dense, dot, Flatten,MaxPooling2D
-from tensorflow.python.keras.models import Model, Sequential
-from tensorflow.python.keras.regularizers import l2
-from tensorflow.python.keras.initializers import Constant
-from tensorflow.python.keras import backend as K
-from tensorflow.python.keras.optimizers import SGD,Adam
-from tensorflow.python.keras.losses import binary_crossentropy
-
 import numpy.random as rng
 import numpy as np
 import os
 import h5py
 from dataset import Dataset
 
-import keras
-
 # Global Constants
 IMG_W = 64;
 IMG_H = 64;
 
 # ====== HYPERPARAMS ======
-batch_sz = 10;
+batch_sz = 100;
 num_steps = 100;
 
 
@@ -40,7 +28,7 @@ def loss_func(y_true, y_pred):
     dist = tf.sqrt(y_pred);
     #loss_val = tf.cond(y_true > 0.5, lambda: dist, lambda: tf.maximum(0.0, tf.subtract(10.0, dist)))
     
-    match_term = multiply([dist, y_true]); # y_true * dist
+    match_term = tf.multiply(dist, y_true); # y_true * dist
     match_term = tf.reshape(match_term, (batch_sz,));
     
     # y_true == 0:
@@ -104,7 +92,7 @@ with tf.device('/cpu:0'):
     y = tf.placeholder(tf.float32, [None])
     scores = SiameseNet()(x);
     loss_calc = loss_func(y, scores);
-    optimizer = tf.train.GradientDescentOptimizer(5e-3);
+    optimizer = tf.train.GradientDescentOptimizer(1e-5);
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
         train_op = optimizer.minimize(loss_calc)
@@ -124,7 +112,7 @@ with tf.Session() as sess:
 #                             )
         
         loss_output, _ = sess.run([loss_calc, train_op], feed_dict=feed_dict)
-#        print np.mean(loss_output)
+        print 'Step', step, ' - Loss', loss_output
         
         
 
@@ -132,7 +120,7 @@ with tf.Session() as sess:
 
         # next step
         num_steps = 20
-        if step > num_steps:
+        if step >= num_steps:
             break;
         step += 1
 

@@ -65,13 +65,20 @@ class SiameseNet(tf.keras.Model):
     # apply convnet; operates only on one of the left/right channels at a time.
     def apply_convnet(self, x):
 
-        # the actual network architecture:
+        # CNN architecture
+        
         x_out = self.conv1(x)
         x_out = self.pool1(x_out)
         x_out = self.norm1(x_out)
+        
         x_out = self.conv2(x_out)
         x_out = self.pool2(x_out)
         x_out = self.norm2(x_out)
+        
+        x_out = self.conv3(x_out)
+        x_out = self.pool3(x_out)
+        x_out = self.norm3(x_out)
+        
         # flatten because at the end we want a single descriptor per input
         x_out = tf.layers.flatten(x_out);
         return x_out;
@@ -116,22 +123,11 @@ with tf.Session() as sess:
     step = 1;
     for X_batch, y_batch in training_dset:
         feed_dict = {x: X_batch, y: y_batch}
-        
-#        loss_calc = tf.Print(loss_calc,
-#                             [tf.gradients(loss_calc, tf.trainable_variables()[1])],
-#                             summarize=10
-#                             )
-        
         loss_output, _ = sess.run([loss_calc, train_op], feed_dict=feed_dict)
-
-        print np.mean(loss_output)
         
-        
-
-
-
-        # next step
-        if step > num_steps:
+        # training progress log
+        print 'Step', step, '- Loss', np.around(loss_output, 3)
+        if step >= num_steps:
             break;
         step += 1
 

@@ -18,7 +18,7 @@ class Dataset(object):
 
     def next(self):
         # initialize X and y
-        X = np.zeros((self.batch_size, 2, 64, 64))
+        X = np.zeros((self.batch_size, 2, 64, 64), dtype = "uint8")
         y = np.zeros(self.batch_size,)
         # for i in batch size
         for i in xrange(self.batch_size):
@@ -29,7 +29,7 @@ class Dataset(object):
             # if i is odd
             else:
                 # generate a negative example
-                example = self.generatePositiveExample()
+                example = self.generateNegativeExample()
             # store example
             X[i] = example.copy()
             # store label

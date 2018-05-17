@@ -10,8 +10,8 @@ IMG_W = 64;
 IMG_H = 64;
 
 # ====== HYPERPARAMS ======
-batch_sz = 100;
-num_steps = 100;
+batch_sz = 50;
+num_steps = 1000;
 
 
 # ====== LOAD DATA ======
@@ -34,7 +34,7 @@ def loss_func(y_true, y_pred):
     # y_true == 0:
     one_const = tf.constant(1.0, shape=(batch_sz,)); # one = 1
     nonmatch_term_coeff = tf.subtract(one_const, y_true); # (1 - ytrue)
-    C = tf.constant(5.0); 
+    C = tf.constant(0.5);
     zero_const = tf.constant(0.0, shape=(batch_sz,)); # zero = 0
     c_minus_dist = tf.subtract(C, dist); # C - dist
     c_minus_dist = tf.reshape(c_minus_dist, (batch_sz,));
@@ -45,6 +45,25 @@ def loss_func(y_true, y_pred):
     loss_val = tf.add(match_term, nonmatch_term);
     loss_val = tf.reduce_mean(loss_val)
     return loss_val
+
+def check_accuracy(y_pred, y_true):
+  # can we treat these as np arrays?
+  dists = np.sqrt(y_pred).reshape((-1))
+  # find threshold
+  max_acc = 0
+  thresh_dist = 0
+  for d_idx in range(0,100):
+    d = float(d_idx)/10.0
+    match_correct = np.sum((dists<d)&(y_true==1))
+    nomatch_correct = np.sum((dists>=d)&(y_true==0))
+    # print "correct: ", match_correct, nomatch_correct, d
+    acc = (match_correct + nomatch_correct)/(np.float(len(y_true)))
+    if acc > max_acc:
+      max_acc = acc
+      thresh_dist = d
+  return max_acc
+
+
 
 class SiameseNet(tf.keras.Model):
 
@@ -112,11 +131,13 @@ with tf.device('/cpu:0'):
     y = tf.placeholder(tf.float32, [None])
     scores = SiameseNet()(x);
     loss_calc = loss_func(y, scores);
-    optimizer = tf.train.GradientDescentOptimizer(1e-5);
+    optimizer = tf.train.GradientDescentOptimizer(1e-3);
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
         train_op = optimizer.minimize(loss_calc)
 
+
+# TODO: look into is_training flag, usually passed into feed_dict
 # Run computational graph
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
@@ -126,8 +147,12 @@ with tf.Session() as sess:
         loss_output, _ = sess.run([loss_calc, train_op], feed_dict=feed_dict)
         
         # training progress log
-        print 'Step', step, '- Loss', np.around(loss_output, 3)
-        if step >= num_steps:
+#        print 'Step', step, '- Loss', np.around(loss_output, 3)
+        print np.around(loss_output, 3)
+        y_pred = sess.run([scores], feed_dict=feed_dict)
+        train_acc = check_accuracy(y_pred, y_batch)
+        print "training accuracy: ", train_acc
+        if step >= num_steps or np.isnan(loss_output):
             break;
         step += 1
 

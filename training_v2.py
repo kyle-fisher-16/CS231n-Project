@@ -10,8 +10,9 @@ IMG_W = 64;
 IMG_H = 64;
 
 # ====== HYPERPARAMS ======
-batch_sz = 50;
+batch_sz = 1000;
 num_steps = 1000;
+learning_rate = 1e-3;
 
 
 # ====== LOAD DATA ======
@@ -25,8 +26,11 @@ def loss_func(y_true, y_pred):
     # Here, we calculate:
     # (y_true * dist) + (1 - ytrue) * max(0, C - dist)
     # y_true == 1:
-    dist = tf.sqrt(y_pred);
+    
+    # TODO: CLEAN VERSION
     #loss_val = tf.cond(y_true > 0.5, lambda: dist, lambda: tf.maximum(0.0, tf.subtract(10.0, dist)))
+    
+    dist = y_pred;
     
     match_term = tf.multiply(dist, y_true); # y_true * dist
     match_term = tf.reshape(match_term, (batch_sz,));
@@ -34,7 +38,7 @@ def loss_func(y_true, y_pred):
     # y_true == 0:
     one_const = tf.constant(1.0, shape=(batch_sz,)); # one = 1
     nonmatch_term_coeff = tf.subtract(one_const, y_true); # (1 - ytrue)
-    C = tf.constant(0.5);
+    C = tf.constant(5.0);
     zero_const = tf.constant(0.0, shape=(batch_sz,)); # zero = 0
     c_minus_dist = tf.subtract(C, dist); # C - dist
     c_minus_dist = tf.reshape(c_minus_dist, (batch_sz,));
@@ -44,24 +48,37 @@ def loss_func(y_true, y_pred):
     # add the two losses
     loss_val = tf.add(match_term, nonmatch_term);
     loss_val = tf.reduce_mean(loss_val)
-    return loss_val
+    
+    
+    
+    return loss_val;
 
 def check_accuracy(y_pred, y_true):
-  # can we treat these as np arrays?
-  dists = np.sqrt(y_pred).reshape((-1))
-  # find threshold
-  max_acc = 0
-  thresh_dist = 0
-  for d_idx in range(0,100):
-    d = float(d_idx)/10.0
+    stats = {}
+    
+    dists = np.asarray(y_pred).reshape((-1))
+    
+#    find threshold (brute force)
+#    max_acc = 0
+#    thresh_dist = 0
+#    for d_idx in range(0,100):
+#        d = float(d_idx)/10.0
+#        match_correct = np.sum((dists<d)&(y_true==1))
+#        nomatch_correct = np.sum((dists>=d)&(y_true==0))
+#        # print "correct: ", match_correct, nomatch_correct, d
+#        acc = (match_correct + nomatch_correct)/(np.float(len(y_true)))
+#        if acc > max_acc:
+#            max_acc = acc
+#            thresh_dist = d
+
+    d = 0.5; # thresh distance
     match_correct = np.sum((dists<d)&(y_true==1))
     nomatch_correct = np.sum((dists>=d)&(y_true==0))
-    # print "correct: ", match_correct, nomatch_correct, d
     acc = (match_correct + nomatch_correct)/(np.float(len(y_true)))
-    if acc > max_acc:
-      max_acc = acc
-      thresh_dist = d
-  return max_acc
+    
+    stats['acc'] = acc;
+    stats['avg_dist'] = np.mean(dists);
+    return stats
 
 
 
@@ -80,7 +97,7 @@ class SiameseNet(tf.keras.Model):
         
         self.conv3 = tf.layers.Conv2D(filters = 128, kernel_size = (5, 5), strides = (4, 4), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
         self.pool3 = tf.layers.MaxPooling2D(pool_size = (4, 4), padding = "SAME", strides = (4, 4))
-        self.norm3 = tf.layers.BatchNormalization(axis = 0, momentum = 0.99, epsilon = 1.0E-7)
+    
     # apply convnet; operates only on one of the left/right channels at a time.
     def apply_convnet(self, x):
 
@@ -96,7 +113,7 @@ class SiameseNet(tf.keras.Model):
         
         x_out = self.conv3(x_out)
         x_out = self.pool3(x_out)
-        x_out = self.norm3(x_out)
+
         
         # flatten because at the end we want a single descriptor per input
         x_out = tf.layers.flatten(x_out);
@@ -117,11 +134,12 @@ class SiameseNet(tf.keras.Model):
 
 #        xL = tf.Print(xL, [xL], summarize = batch_sz)
 
-        # compute distance squared; we will pass this to the loss function
+        # compute distance; we will pass this to the loss function
         dist_sq = tf.subtract(xL, xR);
         dist_sq = tf.multiply(dist_sq, dist_sq);
         dist_sq = tf.reduce_sum(dist_sq, axis=1)#, keepdims=True);
-        return dist_sq
+        dist = tf.sqrt(dist_sq);
+        return dist
 
 # ====== TRAINING ======
 # Construct computational graph
@@ -131,7 +149,7 @@ with tf.device('/cpu:0'):
     y = tf.placeholder(tf.float32, [None])
     scores = SiameseNet()(x);
     loss_calc = loss_func(y, scores);
-    optimizer = tf.train.GradientDescentOptimizer(1e-3);
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate);
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
         train_op = optimizer.minimize(loss_calc)
@@ -144,14 +162,22 @@ with tf.Session() as sess:
     step = 1;
     for X_batch, y_batch in training_dset:
         feed_dict = {x: X_batch, y: y_batch}
+        
+        # check accuracy
+        y_pred = sess.run([scores], feed_dict=feed_dict)
+        train_stats = check_accuracy(y_pred, y_batch)
+        
+        # do training step
         loss_output, _ = sess.run([loss_calc, train_op], feed_dict=feed_dict)
         
+
         # training progress log
-#        print 'Step', step, '- Loss', np.around(loss_output, 3)
-        print np.around(loss_output, 3)
-        y_pred = sess.run([scores], feed_dict=feed_dict)
-        train_acc = check_accuracy(y_pred, y_batch)
-        print "training accuracy: ", train_acc
+        print 'Step', ('%6s' % step), '  |  ', \
+                'Loss', ('%6s' % str(np.around(loss_output, 3))), '  |  ', \
+                'Training Acc', (('%6s' % np.around(100.0*train_stats['acc'], 1)) + '%'), '  |  ', \
+                'Avg Dist', ('%6s' % np.around(train_stats['avg_dist'], 3))
+
+
         if step >= num_steps or np.isnan(loss_output):
             break;
         step += 1

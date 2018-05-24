@@ -9,16 +9,18 @@ data = h5py.File('data/liberty.h5', 'r')
 
 class Dataset(object):
 
-    def __init__(self, data, batch_size):
+    def __init__(self, data, batch_size, max_dataset_size=np.inf):
         self.data = data
         self.batch_size = batch_size
+        
         self.nGroups = int(self.data.keys()[-1])
+        self.nGroups = np.minimum(self.nGroups, max_dataset_size)
+        
         self.groupIdx = xrange(self.nGroups + 1)
         self._pDict = self._getAllPositiveExampleIndices()
-        print self._pDict[1]
         self._keypoint = 0
         self._combIdx = 0
-        self._maxKeypoints = len(self.data.keys())
+        self._maxKeypoints = self.nGroups + 1
 
     def __iter__(self):
         return self
@@ -121,7 +123,8 @@ class Dataset(object):
 
 
 if __name__ == '__main__':
-    train_dset = Dataset(data, batch_size=5)
+    train_dset = Dataset(data, batch_size=5, max_dataset_size=1000)
+    train_dset.next()
     example = train_dset.generatePositiveExample()
     print example.shape
 

@@ -12,15 +12,15 @@ IMG_H = 64;
 PLOT_BATCH = True; # whether or not to plot the batch distances
 
 # ====== HYPERPARAMS ======
-mining_ratio = 8;
-batch_sz = 32;
+mining_ratio = 2;
+batch_sz = 64;
 num_steps = 1000;
-learning_rate = 1e-3;
-batches_per_epoch = 5;
+num_epochs = 50;
+learning_rate = 1e-4;
 
 # ====== LOAD DATA ======
 data = h5py.File('data/liberty.h5', 'r')
-training_dset = Dataset(data, batch_size=batch_sz);
+#training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=3000);
 
 # ====== SETUP ======
 if PLOT_BATCH:
@@ -177,13 +177,15 @@ with tf.device('/cpu:0'):
     with tf.control_dependencies(update_ops):
         train_op = optimizer.minimize(loss_scalar_calc)
 
-def mine_one_batch(session_ref):
-    
+def mine_one_batch(session_ref, dataset_ref):
     X_unmined = np.zeros((0, 2, IMG_W, IMG_H))
     y_unmined = np.zeros((0,))
     loss_unmined = np.zeros((0,))
     for i in range(mining_ratio):
-        X_batch, y_batch = training_dset.next()
+        try:
+            X_batch, y_batch = dataset_ref.next()
+        except:
+            return None, None;
         feed_dict = {x: X_batch, y: y_batch }
         
         # only forward prop
@@ -214,7 +216,6 @@ def mine_one_batch(session_ref):
     X_mined = np.vstack((X_mined_p, X_mined_n))
     y_mined = np.concatenate((y_mined_p, y_mined_n))
     
-    
     return X_mined, y_mined
 
 
@@ -226,27 +227,37 @@ with tf.Session() as sess:
     plt.ion()
     ct = 0;
     
-    # ======= MINING =======
-    for i in range(num_steps):
-        X_batch, y_batch = mine_one_batch(sess)
-    
-        # check accuracy
-        feed_dict = {x: X_batch, y: y_batch }
-        dists_out_np = sess.run(dists_out, feed_dict=feed_dict)
+    for epoch_num in range(1,num_epochs+1, 1):
+        print 'BEGINNING EPOCH #' + str(epoch_num)
         
-        train_stats = check_accuracy(dists_out_np, y_batch)
+        # ======= MINING =======
+        print 'Mining...'
+        training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=300);
+        mined_batches = [] # set of mined batches (indices)
+        while True:
+            X_batch, y_batch = mine_one_batch(sess, training_dset)
+            if X_batch is None:
+                break;
+            mined_batches.append((X_batch, y_batch))
 
-        # do training step
-        loss_output, _ = sess.run([loss_scalar_calc, train_op], feed_dict=feed_dict)
+        # ======= TRAINING =======
+        for X_mined, y_mined in mined_batches:
+            feed_dict = {x: X_mined, y: y_mined }
+            
+            # check accuracy for this step
+            dists_out_np = sess.run(dists_out, feed_dict=feed_dict)
+            train_stats = check_accuracy(dists_out_np, y_mined)
 
-        # training progress log
-        print 'Step', ('%6s' % step), '  |  ', \
-                'Loss', ('%6s' % str(np.around(loss_output, 3))), '  |  ', \
-                'Training Acc', (('%6s' % np.around(100.0*train_stats['acc'], 1)) + '%'), '  |  ', \
-                'Avg Dist', ('%6s' % np.around(train_stats['avg_dist'], 3))
+            # do training step
+            loss_output, _ = sess.run([loss_scalar_calc, train_op], feed_dict=feed_dict)
 
+            # training progress log
+            print 'Step', ('%6s' % step), '  |  ', \
+                    'Loss', ('%6s' % str(np.around(loss_output, 3))), '  |  ', \
+                    'Training Acc', (('%6s' % np.around(100.0*train_stats['acc'], 1)) + '%'), '  |  ', \
+                    'Avg Dist', ('%6s' % np.around(train_stats['avg_dist'], 3))
 
-        if step >= num_steps or np.isnan(loss_output):
-            break;
-        step += 1
+            if step >= num_steps or np.isnan(loss_output):
+                break;
+            step += 1
 

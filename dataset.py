@@ -2,6 +2,8 @@
 
 import h5py
 import numpy as np
+from itertools import combinations as comb
+import pdb
 
 data = h5py.File('data/liberty.h5', 'r')
 
@@ -12,6 +14,11 @@ class Dataset(object):
         self.batch_size = batch_size
         self.nGroups = int(self.data.keys()[-1])
         self.groupIdx = xrange(self.nGroups + 1)
+        self._pDict = self._getAllPositiveExampleIndices()
+        print self._pDict[1]
+        self._keypoint = 0
+        self._combIdx = 0
+        self._maxKeypoints = len(self.data.keys())
 
     def __iter__(self):
         return self
@@ -38,6 +45,29 @@ class Dataset(object):
         return X, y
     
     def generatePositiveExample(self):
+        # get the current positive example
+        exIdx = self._pDict[self._keypoint][self._combIdx]
+        example = self.data[str(self._keypoint)][exIdx, :]
+        example = np.reshape(example, (2, 64, 64))
+        # increment the comb index
+        self._combIdx += 1
+        # if the comb index equals the number of combs
+        if (self._combIdx == len(self._pDict[self._keypoint])):
+            # reset the comb index to 0
+            self._combIdx = 0
+            # increment the keypoint
+            self._keypoint += 1
+            # if the keypoint equals the number of dictionary items
+            if (self._keypoint == self._maxKeypoints):
+                # reset the keypoint
+                self._keypoint = 0
+                # raise the stop iteration flag
+                raise StopIteration
+        # return the example
+        return example
+    
+    '''
+    def generatePositiveExample(self):
         # generate random 3D index
         grpIdx = np.random.choice(self.groupIdx).astype(str)
         # generate distinct patch pair
@@ -49,6 +79,7 @@ class Dataset(object):
         example[1] = np.reshape(data[grpIdx][pchIdx[1]], (64, 64))
         # return example
         return example
+    '''
 
     def generateNegativeExample(self):
         # generate random 3D index pair
@@ -62,12 +93,35 @@ class Dataset(object):
         example = np.zeros((2, 64, 64))
         example[0] = np.reshape(data[grpIdx[0]][pchIdx[0]], (64, 64))
         example[1] = np.reshape(data[grpIdx[1]][pchIdx[1]], (64, 64))
-        return example      
+        return example
+    
+    '''
+    Create a dictionary of every positive example
+    Returns a dictionary where the keys correspond to a 3D point
+    (i.e. the keys are the same as those for the self.data field,
+    except that the keys are integers instead of strings).
+    The item associated with each key is a list of tuples consisting
+    of every unique combination of the patch indices at the 
+    3D coordinate (i.e. every pair from N choose 2)
+    '''
+    def _getAllPositiveExampleIndices(self):
+        # initialize dictionary for positive example indices
+        pDict = {}
+        # for every data index
+        for i in self.groupIdx:
+            # get the number of patches at the data index
+            numPatch = data[str(i)].shape[0]
+            # create a list of the patch indices
+            indices = range(numPatch)
+            # create a list of tuples of every N choose 2 combination 
+            pairs = comb(indices, 2)
+            # store the list in the dictionary
+            pDict[i] = list(pairs)
+        return pDict
 
 
-#if __name__ == '__main__':
-#    train_dset = Dataset(data, batch_size=5)
-#    X, y = train_dset.next()
-#    print X[0, 0, 50, 50]
-#    print X[0, 1, 50, 50]
+if __name__ == '__main__':
+    train_dset = Dataset(data, batch_size=5)
+    example = train_dset.generatePositiveExample()
+    print example.shape
 

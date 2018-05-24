@@ -233,7 +233,7 @@ with tf.Session() as sess:
         # ======= MINING =======
         print 'Mining...'
         training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=300);
-        mined_batches = [] # set of mined batches (indices)
+        mined_batches = [] # set of mined batches
         while True:
             X_batch, y_batch = mine_one_batch(sess, training_dset)
             if X_batch is None:

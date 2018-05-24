@@ -4,23 +4,30 @@ import numpy as np
 import os
 import h5py
 from dataset import Dataset
+import matplotlib.pyplot as plt
 
 # Global Constants
 IMG_W = 64;
 IMG_H = 64;
+PLOT_BATCH = True; # whether or not to plot the batch distances
 
 # ====== HYPERPARAMS ======
-batch_sz = 1000;
-num_steps = 1000;
-learning_rate = 1e-3;
-
+batch_sz = 100;
+num_steps = 10000;
+learning_rate = 2e-3;
 
 # ====== LOAD DATA ======
 data = h5py.File('data/liberty.h5', 'r')
 training_dset = Dataset(data, batch_size=batch_sz);
 
+# ====== SETUP ======
+if PLOT_BATCH:
+    plot_batch_fig, plot_batch_ax = plt.subplots(1,1)
+    plt.ion()
+    plt.show()
+
 # ====== LOSS FUNCTION ======
-def loss_func(y_true, y_pred):
+def hinge_embed_loss_func(y_true, y_pred):
     # y_true - should be boolean (int)... 0 if non-corresponding, 1 if matched.
     # y_pred - is distance squared from siamese network
     # Here, we calculate:
@@ -38,7 +45,7 @@ def loss_func(y_true, y_pred):
     # y_true == 0:
     one_const = tf.constant(1.0, shape=(batch_sz,)); # one = 1
     nonmatch_term_coeff = tf.subtract(one_const, y_true); # (1 - ytrue)
-    C = tf.constant(5.0);
+    C = tf.constant(1.0);
     zero_const = tf.constant(0.0, shape=(batch_sz,)); # zero = 0
     c_minus_dist = tf.subtract(C, dist); # C - dist
     c_minus_dist = tf.reshape(c_minus_dist, (batch_sz,));
@@ -48,33 +55,51 @@ def loss_func(y_true, y_pred):
     # add the two losses
     loss_val = tf.add(match_term, nonmatch_term);
     loss_val = tf.reduce_mean(loss_val)
-    
-    
-    
+
     return loss_val;
+
+def plot_batch(y_pred, y_true):
+    dist_max = 3; # don't draw points after this distance.
+    
+    N = len(y_true);
+    dists = np.asarray(y_pred).reshape((-1))
+    dists = np.minimum(dists, np.ones(dists.shape)*dist_max);
+    
+    x_data = np.zeros((N,));
+    y_data = np.zeros((N,))
+    
+    color_data = []
+
+    for i in range(N):
+        x_data[i] = dists[i];
+        y_data[i] = float(i) / float(N-1);
+        if y_true[i] > 0.5: # matching
+            color_data.append('g');
+        else:
+            color_data.append('r');
+
+    # draw the plot
+    global plot_batch_ax,plot_batch_fig;
+    plot_batch_ax.clear()
+    plot_batch_ax.scatter(x=x_data, y=y_data, c=color_data)
+    plt.xlim(0, dist_max);
+    plt.ylim(0, 1);
+    plot_batch_fig.canvas.draw()
+    plt.pause(0.0001)
+
 
 def check_accuracy(y_pred, y_true):
     stats = {}
     
     dists = np.asarray(y_pred).reshape((-1))
-    
-#    find threshold (brute force)
-#    max_acc = 0
-#    thresh_dist = 0
-#    for d_idx in range(0,100):
-#        d = float(d_idx)/10.0
-#        match_correct = np.sum((dists<d)&(y_true==1))
-#        nomatch_correct = np.sum((dists>=d)&(y_true==0))
-#        # print "correct: ", match_correct, nomatch_correct, d
-#        acc = (match_correct + nomatch_correct)/(np.float(len(y_true)))
-#        if acc > max_acc:
-#            max_acc = acc
-#            thresh_dist = d
 
     d = 0.5; # thresh distance
     match_correct = np.sum((dists<d)&(y_true==1))
     nomatch_correct = np.sum((dists>=d)&(y_true==0))
     acc = (match_correct + nomatch_correct)/(np.float(len(y_true)))
+
+    if PLOT_BATCH:
+        plot_batch(y_pred, y_true)
     
     stats['acc'] = acc;
     stats['avg_dist'] = np.mean(dists);
@@ -132,8 +157,6 @@ class SiameseNet(tf.keras.Model):
         xL = self.apply_convnet(xL)
         xR = self.apply_convnet(xR)
 
-#        xL = tf.Print(xL, [xL], summarize = batch_sz)
-
         # compute distance; we will pass this to the loss function
         dist_sq = tf.subtract(xL, xR);
         dist_sq = tf.multiply(dist_sq, dist_sq);
@@ -148,7 +171,7 @@ with tf.device('/cpu:0'):
     x = tf.placeholder(tf.float32, [None, 2, IMG_W, IMG_H])
     y = tf.placeholder(tf.float32, [None])
     scores = SiameseNet()(x);
-    loss_calc = loss_func(y, scores);
+    loss_calc = hinge_embed_loss_func(y, scores);
     optimizer = tf.train.GradientDescentOptimizer(learning_rate);
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
@@ -160,6 +183,7 @@ with tf.device('/cpu:0'):
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     step = 1;
+    plt.ion()
     for X_batch, y_batch in training_dset:
         feed_dict = {x: X_batch, y: y_batch}
         
@@ -170,7 +194,6 @@ with tf.Session() as sess:
         # do training step
         loss_output, _ = sess.run([loss_calc, train_op], feed_dict=feed_dict)
         
-
         # training progress log
         print 'Step', ('%6s' % step), '  |  ', \
                 'Loss', ('%6s' % str(np.around(loss_output, 3))), '  |  ', \

@@ -14,8 +14,8 @@ PLOT_BATCH = True; # whether or not to plot the batch distances
 # ====== HYPERPARAMS ======
 mining_ratio = 8;
 batch_sz = 32;
-num_steps = 10000;
-learning_rate = 2e-3;
+num_steps = 1000;
+learning_rate = 1e-3;
 batches_per_epoch = 5;
 
 # ====== LOAD DATA ======
@@ -138,7 +138,6 @@ class SiameseNet(tf.keras.Model):
         
         x_out = self.conv3(x_out)
         x_out = self.pool3(x_out)
-
         
         # flatten because at the end we want a single descriptor per input
         x_out = tf.layers.flatten(x_out);
@@ -156,7 +155,7 @@ class SiameseNet(tf.keras.Model):
         # Convnet
         xL = self.apply_convnet(xL)
         xR = self.apply_convnet(xR)
-
+        
         # compute distance; we will pass this to the loss function
         dist_sq = tf.subtract(xL, xR);
         dist_sq = tf.multiply(dist_sq, dist_sq);
@@ -228,14 +227,12 @@ with tf.Session() as sess:
     ct = 0;
     
     # ======= MINING =======
-    for i in range(2000):
+    for i in range(num_steps):
         X_batch, y_batch = mine_one_batch(sess)
     
         # check accuracy
         feed_dict = {x: X_batch, y: y_batch }
         dists_out_np = sess.run(dists_out, feed_dict=feed_dict)
-        
-        print X_batch.shape, y_batch.shape, dists_out_np.shape
         
         train_stats = check_accuracy(dists_out_np, y_batch)
 
@@ -247,9 +244,9 @@ with tf.Session() as sess:
                 'Loss', ('%6s' % str(np.around(loss_output, 3))), '  |  ', \
                 'Training Acc', (('%6s' % np.around(100.0*train_stats['acc'], 1)) + '%'), '  |  ', \
                 'Avg Dist', ('%6s' % np.around(train_stats['avg_dist'], 3))
-#
-#
-#    if step >= num_steps or np.isnan(loss_output):
-#        break;
-#    step += 1
+
+
+        if step >= num_steps or np.isnan(loss_output):
+            break;
+        step += 1
 

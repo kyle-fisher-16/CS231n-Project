@@ -12,13 +12,14 @@ IMG_H = 64;
 PLOT_BATCH = True; # whether or not to plot the batch distances
 
 # ====== HYPERPARAMS ======
-mining_ratio = 8;
-batch_sz = 128;
+mining_ratio = 4;
+batch_sz = 64;
 num_epochs = 50;
 learning_rate = 1e-4;
 
 # ====== LOAD DATA ======
-data = h5py.File('data/liberty.h5', 'r')
+#data = h5py.File('data/liberty.h5', 'r')
+data = h5py.File('trash.h5', 'r')
 #training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=3000);
 
 # ====== SETUP ======
@@ -30,7 +31,7 @@ if PLOT_BATCH:
 # ====== LOSS FUNCTION ======
 def hinge_embed_loss_func(y_true, dist):
     # y_true - should be boolean (int)... 0 if non-corresponding, 1 if matched.
-    # dists - is distance from siamese network
+#     dists - is distance from siamese network
     # Here, we calculate:
     # (y_true * dist) + (1 - ytrue) * max(0, C - dist)
     # y_true == 1:
@@ -155,6 +156,9 @@ class SiameseNet(tf.keras.Model):
         xL = self.apply_convnet(xL)
         xR = self.apply_convnet(xR)
         
+        # Slightly perturb one of these so they can't be identical
+        xL = tf.add(xL, 0.0001);
+        
         # compute distance; we will pass this to the loss function
         dist_sq = tf.subtract(xL, xR);
         dist_sq = tf.multiply(dist_sq, dist_sq);
@@ -171,10 +175,10 @@ with tf.device('/cpu:0'):
     dists_out = SiameseNet()(x);
     loss_vector_calc = hinge_embed_loss_func(y, dists_out);
     loss_scalar_calc = tf.reduce_mean(loss_vector_calc)
-    optimizer = tf.train.GradientDescentOptimizer(learning_rate);
-    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-    with tf.control_dependencies(update_ops):
-        train_op = optimizer.minimize(loss_scalar_calc)
+    optimizer = tf.train.AdamOptimizer(learning_rate)
+    grads = optimizer.compute_gradients(loss_scalar_calc)
+    capped_grads = [(tf.clip_by_value(grad, -1.0, 1.0), var) for grad, var in grads]
+    train_op = optimizer.apply_gradients(capped_grads)
 
 def mine_one_batch(session_ref, dataset_ref):
     X_unmined = np.zeros((0, 4), dtype="uint32")
@@ -183,7 +187,7 @@ def mine_one_batch(session_ref, dataset_ref):
     for i in range(mining_ratio):
         try:
             X_batch, y_batch, pct_complete = dataset_ref.next()
-        except:
+        except StopIteration:
             return None, None, None;
         feed_dict = {x: dataset_ref.fetchImageData(X_batch), y: y_batch }
         

@@ -9,17 +9,18 @@ import matplotlib.pyplot as plt
 # Global Constants
 IMG_W = 64;
 IMG_H = 64;
-PLOT_BATCH = True; # whether or not to plot the batch distances
+PLOT_BATCH = False; # whether or not to plot the batch distances
+dataset_limit = 1000000000; # limit the input dataset (for debugging)
 
 # ====== HYPERPARAMS ======
-mining_ratio = 4;
+mining_ratio = 8;
 batch_sz = 64;
-num_epochs = 50;
-learning_rate = 1e-4;
+num_epochs = 1000;
+learning_rate = 5e-5;
+pct_validation = 10.0;
 
 # ====== LOAD DATA ======
-#data = h5py.File('data/liberty.h5', 'r')
-data = h5py.File('trash.h5', 'r')
+data = h5py.File('data/liberty.h5', 'r')
 #training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=3000);
 
 # ====== SETUP ======
@@ -105,6 +106,22 @@ def check_accuracy(dists_out_np, y_true):
     stats['avg_dist'] = np.mean(dists);
     return stats
 
+def get_val_acc(sess_ref, dset_ref):
+    # X_valset and y_valset should be lists of np.arrays
+    X_valset = dset_ref.val_dataset[0]
+    y_valset = dset_ref.val_dataset[1]
+    print len(X_valset), len(y_valset)
+    all_dists = np.zeros((0,))
+    all_y_true = np.zeros((0,))
+    for i in range(0, len(X_valset)):
+        feed_dict = {x: dset_ref.fetchImageData(X_valset[i]), y: y_valset[i] }
+    
+        # check accuracy for this step
+        dists_out_np = sess_ref.run(dists_out, feed_dict=feed_dict)
+        all_dists = np.concatenate((all_dists, dists_out_np))
+        all_y_true = np.concatenate((all_y_true, y_valset[i]))
+    val_acc_stats = check_accuracy(all_dists, all_y_true)
+    return val_acc_stats
 
 
 class SiameseNet(tf.keras.Model):
@@ -233,9 +250,12 @@ with tf.Session() as sess:
     for epoch_num in range(1,num_epochs+1, 1):
         print 'BEGINNING EPOCH #' + str(epoch_num)
         
+
+        # use 10% of dset for validation
+        training_dset = Dataset(data,batch_sz, pct_for_val=pct_validation, max_dataset_size=dataset_limit);
+        
         # ======= MINING =======
         print 'Mining...'
-        training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=1000);
         mined_batches = [] # set of mined batches
         while True:
             X_batch, y_batch, pct_complete = mine_one_batch(sess, training_dset)
@@ -266,3 +286,7 @@ with tf.Session() as sess:
                 break;
             step += 1
 
+        # check validation accuracy
+        val_acc_stats = get_val_acc(sess, training_dset)
+        print 'END EPOCH #' + str(epoch_num), '  |  ',\
+            'Validation Acc', (('%6s' % np.around(100.0*val_acc_stats['acc'], 1)) + '%')

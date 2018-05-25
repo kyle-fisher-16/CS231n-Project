@@ -1,4 +1,3 @@
-#!/usr/bin/python
 
 import h5py
 import numpy as np
@@ -10,7 +9,7 @@ data = h5py.File('data/liberty.h5', 'r')
 
 class Dataset(object):
 
-    def __init__(self, data, batch_size, max_dataset_size=100000000):
+    def __init__(self, data, batch_size, pct_for_val=10.0, max_dataset_size=100000000):
         self.data = data
         self.batch_size = batch_size
         
@@ -22,6 +21,8 @@ class Dataset(object):
         self._keypoint = 0
         self._combIdx = 0
         self._maxKeypoints = self.nGroups + 1
+    
+        self.val_dataset = self.get_val_data(pct_for_val)
 
     def __iter__(self):
         return self
@@ -48,6 +49,20 @@ class Dataset(object):
             y[i] = int(i % 2 == 0)
         # return examples and labels
         return X, y, pct_complete
+
+    def get_val_data(self, pct_for_val):
+        # seed rng so that always generates same negative examples for validation
+        np.random.seed(231)
+        pct_total_data = 0
+        X_valset = [] # indices, in list form for each batch
+        y_valset = []
+        while (pct_total_data < pct_for_val):
+            X, y, pct_total_data = self.next()
+            X_valset.append(X)
+            y_valset.append(y)
+        # reset rng so that all negative examples will be random here after
+        np.random.seed()
+        return (X_valset, y_valset)
     
     def generatePositiveExample(self):
         # get the current positive example

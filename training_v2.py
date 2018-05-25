@@ -12,13 +12,14 @@ IMG_H = 64;
 PLOT_BATCH = True; # whether or not to plot the batch distances
 
 # ====== HYPERPARAMS ======
-batch_sz = 100;
-num_steps = 10000;
-learning_rate = 2e-3;
+mining_ratio = 8;
+batch_sz = 128;
+num_epochs = 50;
+learning_rate = 1e-4;
 
 # ====== LOAD DATA ======
 data = h5py.File('data/liberty.h5', 'r')
-training_dset = Dataset(data, batch_size=batch_sz);
+#training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=3000);
 
 # ====== SETUP ======
 if PLOT_BATCH:
@@ -27,17 +28,15 @@ if PLOT_BATCH:
     plt.show()
 
 # ====== LOSS FUNCTION ======
-def hinge_embed_loss_func(y_true, y_pred):
+def hinge_embed_loss_func(y_true, dist):
     # y_true - should be boolean (int)... 0 if non-corresponding, 1 if matched.
-    # y_pred - is distance squared from siamese network
+    # dists - is distance from siamese network
     # Here, we calculate:
     # (y_true * dist) + (1 - ytrue) * max(0, C - dist)
     # y_true == 1:
     
     # TODO: CLEAN VERSION
     #loss_val = tf.cond(y_true > 0.5, lambda: dist, lambda: tf.maximum(0.0, tf.subtract(10.0, dist)))
-    
-    dist = y_pred;
     
     match_term = tf.multiply(dist, y_true); # y_true * dist
     match_term = tf.reshape(match_term, (batch_sz,));
@@ -54,15 +53,15 @@ def hinge_embed_loss_func(y_true, y_pred):
     
     # add the two losses
     loss_val = tf.add(match_term, nonmatch_term);
-    loss_val = tf.reduce_mean(loss_val)
+#    loss_val = tf.reduce_mean(loss_val)
 
     return loss_val;
 
-def plot_batch(y_pred, y_true):
+def plot_batch(d, y_true):
     dist_max = 3; # don't draw points after this distance.
     
     N = len(y_true);
-    dists = np.asarray(y_pred).reshape((-1))
+    dists = np.asarray(d).reshape((-1))
     dists = np.minimum(dists, np.ones(dists.shape)*dist_max);
     
     x_data = np.zeros((N,));
@@ -88,10 +87,10 @@ def plot_batch(y_pred, y_true):
     plt.pause(0.0001)
 
 
-def check_accuracy(y_pred, y_true):
+def check_accuracy(dists_out_np, y_true):
     stats = {}
     
-    dists = np.asarray(y_pred).reshape((-1))
+    dists = np.asarray(dists_out_np).reshape((-1))
 
     d = 0.5; # thresh distance
     match_correct = np.sum((dists<d)&(y_true==1))
@@ -99,7 +98,7 @@ def check_accuracy(y_pred, y_true):
     acc = (match_correct + nomatch_correct)/(np.float(len(y_true)))
 
     if PLOT_BATCH:
-        plot_batch(y_pred, y_true)
+        plot_batch(dists, y_true)
     
     stats['acc'] = acc;
     stats['avg_dist'] = np.mean(dists);
@@ -138,7 +137,6 @@ class SiameseNet(tf.keras.Model):
         
         x_out = self.conv3(x_out)
         x_out = self.pool3(x_out)
-
         
         # flatten because at the end we want a single descriptor per input
         x_out = tf.layers.flatten(x_out);
@@ -156,7 +154,7 @@ class SiameseNet(tf.keras.Model):
         # Convnet
         xL = self.apply_convnet(xL)
         xR = self.apply_convnet(xR)
-
+        
         # compute distance; we will pass this to the loss function
         dist_sq = tf.subtract(xL, xR);
         dist_sq = tf.multiply(dist_sq, dist_sq);
@@ -170,12 +168,54 @@ tf.reset_default_graph()
 with tf.device('/cpu:0'):
     x = tf.placeholder(tf.float32, [None, 2, IMG_W, IMG_H])
     y = tf.placeholder(tf.float32, [None])
-    scores = SiameseNet()(x);
-    loss_calc = hinge_embed_loss_func(y, scores);
+    dists_out = SiameseNet()(x);
+    loss_vector_calc = hinge_embed_loss_func(y, dists_out);
+    loss_scalar_calc = tf.reduce_mean(loss_vector_calc)
     optimizer = tf.train.GradientDescentOptimizer(learning_rate);
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
-        train_op = optimizer.minimize(loss_calc)
+        train_op = optimizer.minimize(loss_scalar_calc)
+
+def mine_one_batch(session_ref, dataset_ref):
+    X_unmined = np.zeros((0, 4), dtype="uint32")
+    y_unmined = np.zeros((0,), dtype="uint32")
+    loss_unmined = np.zeros((0,), dtype="float32")
+    for i in range(mining_ratio):
+        try:
+            X_batch, y_batch, pct_complete = dataset_ref.next()
+        except:
+            return None, None, None;
+        feed_dict = {x: dataset_ref.fetchImageData(X_batch), y: y_batch }
+        
+        # only forward prop
+        loss_output = session_ref.run(loss_vector_calc, feed_dict=feed_dict)
+        
+        # save the results
+        X_unmined = np.vstack((X_unmined, X_batch));
+        y_unmined = np.concatenate((y_unmined, y_batch));
+        loss_unmined = np.concatenate((loss_unmined, loss_output));
+
+    evens = range(0,X_unmined.shape[0],2)
+    odds = range(1,X_unmined.shape[0],2)
+
+    X_unmined_p = X_unmined[evens]
+    y_unmined_p = y_unmined[evens]
+    loss_unmined_p = loss_unmined[evens]
+    X_unmined_n = X_unmined[odds]
+    y_unmined_n = y_unmined[odds]
+    loss_unmined_n = loss_unmined[odds]
+
+    idx_p = np.argsort(-loss_unmined_p)
+    idx_n = np.argsort(-loss_unmined_n)
+    X_mined_p = X_unmined_p[idx_p[0:batch_sz/2]]
+    X_mined_n = X_unmined_n[idx_n[0:batch_sz/2]]
+    y_mined_p = y_unmined_p[idx_p[0:batch_sz/2]]
+    y_mined_n = y_unmined_n[idx_n[0:batch_sz/2]]
+
+    X_mined = np.vstack((X_mined_p, X_mined_n))
+    y_mined = np.concatenate((y_mined_p, y_mined_n))
+    
+    return X_mined, y_mined, pct_complete
 
 
 # TODO: look into is_training flag, usually passed into feed_dict
@@ -184,24 +224,41 @@ with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     step = 1;
     plt.ion()
-    for X_batch, y_batch in training_dset:
-        feed_dict = {x: X_batch, y: y_batch}
+    ct = 0;
+    
+    for epoch_num in range(1,num_epochs+1, 1):
+        print 'BEGINNING EPOCH #' + str(epoch_num)
         
-        # check accuracy
-        y_pred = sess.run([scores], feed_dict=feed_dict)
-        train_stats = check_accuracy(y_pred, y_batch)
+        # ======= MINING =======
+        print 'Mining...'
+        training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=1000);
+        mined_batches = [] # set of mined batches
+        while True:
+            X_batch, y_batch, pct_complete = mine_one_batch(sess, training_dset)
+            if X_batch is None:
+                break;
+            print str(np.around(pct_complete, 1)) + '% mined'
+            mined_batches.append((X_batch, y_batch))
+        print 'Done mining!'
         
-        # do training step
-        loss_output, _ = sess.run([loss_calc, train_op], feed_dict=feed_dict)
-        
-        # training progress log
-        print 'Step', ('%6s' % step), '  |  ', \
-                'Loss', ('%6s' % str(np.around(loss_output, 3))), '  |  ', \
-                'Training Acc', (('%6s' % np.around(100.0*train_stats['acc'], 1)) + '%'), '  |  ', \
-                'Avg Dist', ('%6s' % np.around(train_stats['avg_dist'], 3))
+        # ======= TRAINING =======
+        for X_mined, y_mined in mined_batches:
+            feed_dict = {x: training_dset.fetchImageData(X_mined), y: y_mined }
+            
+            # check accuracy for this step
+            dists_out_np = sess.run(dists_out, feed_dict=feed_dict)
+            train_stats = check_accuracy(dists_out_np, y_mined)
 
+            # do training step
+            loss_output, _ = sess.run([loss_scalar_calc, train_op], feed_dict=feed_dict)
 
-        if step >= num_steps or np.isnan(loss_output):
-            break;
-        step += 1
+            # training progress log
+            print 'Step', ('%6s' % step), '  |  ', \
+                    'Loss', ('%6s' % str(np.around(loss_output, 3))), '  |  ', \
+                    'Training Acc', (('%6s' % np.around(100.0*train_stats['acc'], 1)) + '%'), '  |  ', \
+                    'Avg Dist', ('%6s' % np.around(train_stats['avg_dist'], 3))
+
+            if np.isnan(loss_output):
+                break;
+            step += 1
 

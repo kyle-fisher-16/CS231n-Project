@@ -12,15 +12,14 @@ IMG_H = 64;
 PLOT_BATCH = True; # whether or not to plot the batch distances
 
 # ====== HYPERPARAMS ======
-mining_ratio = 2;
-batch_sz = 64;
-num_steps = 1000;
+mining_ratio = 8;
+batch_sz = 128;
 num_epochs = 50;
 learning_rate = 1e-4;
 
 # ====== LOAD DATA ======
 data = h5py.File('data/liberty.h5', 'r')
-training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=3000);
+#training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=3000);
 
 # ====== SETUP ======
 if PLOT_BATCH:
@@ -183,9 +182,9 @@ def mine_one_batch(session_ref, dataset_ref):
     loss_unmined = np.zeros((0,), dtype="float32")
     for i in range(mining_ratio):
         try:
-            X_batch, y_batch = dataset_ref.next()
+            X_batch, y_batch, pct_complete = dataset_ref.next()
         except:
-            return None, None;
+            return None, None, None;
         feed_dict = {x: dataset_ref.fetchImageData(X_batch), y: y_batch }
         
         # only forward prop
@@ -216,7 +215,7 @@ def mine_one_batch(session_ref, dataset_ref):
     X_mined = np.vstack((X_mined_p, X_mined_n))
     y_mined = np.concatenate((y_mined_p, y_mined_n))
     
-    return X_mined, y_mined
+    return X_mined, y_mined, pct_complete
 
 
 # TODO: look into is_training flag, usually passed into feed_dict
@@ -231,15 +230,17 @@ with tf.Session() as sess:
         print 'BEGINNING EPOCH #' + str(epoch_num)
         
         # ======= MINING =======
-        training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=300);
+        print 'Mining...'
+        training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=1000);
         mined_batches = [] # set of mined batches
         while True:
-            X_batch, y_batch = mine_one_batch(sess, training_dset)
+            X_batch, y_batch, pct_complete = mine_one_batch(sess, training_dset)
             if X_batch is None:
                 break;
+            print str(np.around(pct_complete, 1)) + '% mined'
             mined_batches.append((X_batch, y_batch))
-            print 'append mined_batches', X_batch.shape, len(mined_batches)
-
+        print 'Done mining!'
+        
         # ======= TRAINING =======
         for X_mined, y_mined in mined_batches:
             feed_dict = {x: training_dset.fetchImageData(X_mined), y: y_mined }
@@ -257,7 +258,7 @@ with tf.Session() as sess:
                     'Training Acc', (('%6s' % np.around(100.0*train_stats['acc'], 1)) + '%'), '  |  ', \
                     'Avg Dist', ('%6s' % np.around(train_stats['avg_dist'], 3))
 
-            if step >= num_steps or np.isnan(loss_output):
+            if np.isnan(loss_output):
                 break;
             step += 1
 

@@ -10,7 +10,7 @@ data = h5py.File('data/liberty.h5', 'r')
 
 class Dataset(object):
 
-    def __init__(self, data, batch_size, max_dataset_size=np.inf):
+    def __init__(self, data, batch_size, max_dataset_size=100000000):
         self.data = data
         self.batch_size = batch_size
         
@@ -30,12 +30,13 @@ class Dataset(object):
         # initialize X and y
         X = np.zeros((self.batch_size, 4), dtype = "int32") # indices
         y = np.zeros(self.batch_size,)
+        pct_complete = 0.0;
         # for i in batch size
         for i in xrange(self.batch_size):
             # if i is even
             if i % 2 == 0:
                 # generate a positive example
-                example_idx = self.generatePositiveExample()
+                example_idx, pct_complete = self.generatePositiveExample()
             # if i is odd
             else:
                 # generate a negative example
@@ -45,7 +46,7 @@ class Dataset(object):
             # store label
             y[i] = int(i % 2 == 0)
         # return examples and labels
-        return X, y
+        return X, y, pct_complete
     
     def generatePositiveExample(self):
         # get the current positive example
@@ -68,9 +69,10 @@ class Dataset(object):
                 self._keypoint = 0
                 # raise the stop iteration flag
                 raise StopIteration
-        # return the example pair
-#        print outIdx
-        return outIdx
+        # percentage of the data we've visited
+        pct = 100.0 * float(self._keypoint) / self._maxKeypoints;
+        
+        return outIdx, pct
     
     # fetch the image data (given the indices stored in batch_idx)
     # indices are an Nx4 array.

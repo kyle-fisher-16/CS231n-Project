@@ -20,7 +20,7 @@ learning_rate = 1e-4;
 
 # ====== LOAD DATA ======
 data = h5py.File('data/liberty.h5', 'r')
-#training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=3000);
+training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=3000);
 
 # ====== SETUP ======
 if PLOT_BATCH:
@@ -178,15 +178,15 @@ with tf.device('/cpu:0'):
         train_op = optimizer.minimize(loss_scalar_calc)
 
 def mine_one_batch(session_ref, dataset_ref):
-    X_unmined = np.zeros((0, 2, IMG_W, IMG_H))
-    y_unmined = np.zeros((0,))
-    loss_unmined = np.zeros((0,))
+    X_unmined = np.zeros((0, 4), dtype="uint32")
+    y_unmined = np.zeros((0,), dtype="uint32")
+    loss_unmined = np.zeros((0,), dtype="float32")
     for i in range(mining_ratio):
         try:
             X_batch, y_batch = dataset_ref.next()
         except:
             return None, None;
-        feed_dict = {x: X_batch, y: y_batch }
+        feed_dict = {x: dataset_ref.fetchImageData(X_batch), y: y_batch }
         
         # only forward prop
         loss_output = session_ref.run(loss_vector_calc, feed_dict=feed_dict)
@@ -231,7 +231,6 @@ with tf.Session() as sess:
         print 'BEGINNING EPOCH #' + str(epoch_num)
         
         # ======= MINING =======
-        print 'Mining...'
         training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=300);
         mined_batches = [] # set of mined batches
         while True:
@@ -239,10 +238,11 @@ with tf.Session() as sess:
             if X_batch is None:
                 break;
             mined_batches.append((X_batch, y_batch))
+            print 'append mined_batches', X_batch.shape, len(mined_batches)
 
         # ======= TRAINING =======
         for X_mined, y_mined in mined_batches:
-            feed_dict = {x: X_mined, y: y_mined }
+            feed_dict = {x: training_dset.fetchImageData(X_mined), y: y_mined }
             
             # check accuracy for this step
             dists_out_np = sess.run(dists_out, feed_dict=feed_dict)

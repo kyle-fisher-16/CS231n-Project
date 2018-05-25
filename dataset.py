@@ -41,6 +41,7 @@ class Dataset(object):
             else:
                 # generate a negative example
                 example_idx = self.generateNegativeExample()
+
             # store example
             X[i] = example_idx;
             # store label
@@ -82,14 +83,32 @@ class Dataset(object):
         ct = 0;
         for idx in batch_idx:
             # left patch
-            patch_group = self.data[str(idx[0])];
-            out_imgs[ct, 0, :, :] = patch_group[idx[1], :].reshape(64, 64)
+            left_patch_group = self.data[str(idx[0])];
+            left_patch = left_patch_group[idx[1], :].reshape(64, 64);
             
             # right patch
-            patch_group = self.data[str(idx[2])];
-            out_imgs[ct, 1, :, :] = patch_group[idx[3], :].reshape(64, 64)
+            right_patch_group = self.data[str(idx[2])];
+            right_patch = right_patch_group[idx[3], :].reshape(64, 64);
+            
+            if (idx[0] == idx[2] and idx[1] == idx[3]):
+                print
+                print 'WARNING: DUPLICATE INDICES FOUND'
+                print
+            
+            # check for duplicates
+            if (np.all(left_patch == right_patch)):
+                print
+                print 'WARNING: DUPLICATE IMAGE FOUND'
+                print 'Indices:', idx[0], idx[2], idx[1], idx[3]
+                print
+
+            # assign this example into the batch
+            out_imgs[ct, 0, :, :] = left_patch;
+            out_imgs[ct, 1, :, :] = right_patch;
+            
             ct += 1;
-        return out_imgs
+        
+        return out_imgs[0:ct] # TODO: fix the skipped y-idc
 
     # generate indices for a negative example
     def generateNegativeExample(self):
@@ -132,8 +151,7 @@ class Dataset(object):
 if __name__ == '__main__':
     train_dset = Dataset(data, batch_size=5, max_dataset_size=5000)
     X_batch, y_batch = train_dset.next()
-#    print X_batch, y_batch
-#    batch_imgs = train_dset.fetchImageData(X_batch)
+    batch_imgs = train_dset.fetchImageData(X_batch)
 #    print batch_imgs
 #    example = train_dset.generatePositiveExample()
 #    print example

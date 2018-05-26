@@ -10,11 +10,11 @@ import matplotlib.pyplot as plt
 IMG_W = 64;
 IMG_H = 64;
 PLOT_BATCH = False; # whether or not to plot the batch distances
-dataset_limit = 1000000000; # limit the input dataset (for debugging)
+dataset_limit = 20000; # limit the input dataset (for debugging)
 
 # ====== HYPERPARAMS ======
 mining_ratio = 8;
-batch_sz = 64;
+batch_sz = 128;
 num_epochs = 1000;
 learning_rate = 5e-5;
 pct_validation = 10.0;
@@ -110,7 +110,6 @@ def get_val_acc(sess_ref, dset_ref):
     # X_valset and y_valset should be lists of np.arrays
     X_valset = dset_ref.val_dataset[0]
     y_valset = dset_ref.val_dataset[1]
-    print len(X_valset), len(y_valset)
     all_dists = np.zeros((0,))
     all_y_true = np.zeros((0,))
     for i in range(0, len(X_valset)):

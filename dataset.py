@@ -14,7 +14,9 @@ class Dataset(object):
         self.batch_size = batch_size
         
         self.nGroups = int(self.data.keys()[-1])
+        print 'Loaded dataset, complete size =', self.nGroups, 'keypoints.'
         self.nGroups = np.minimum(self.nGroups, max_dataset_size)
+        print 'Limited dataset size to', self.nGroups, 'keypoints.'
         
         self.groupIdx = xrange(self.nGroups + 1)
         self._pDict = self._getAllPositiveExampleIndices()
@@ -51,6 +53,7 @@ class Dataset(object):
         return X, y, pct_complete
 
     def get_val_data(self, pct_for_val):
+        print 'Generating validation dataset...'
         # seed rng so that always generates same negative examples for validation
         np.random.seed(231)
         pct_total_data = 0
@@ -149,9 +152,16 @@ class Dataset(object):
     '''
     def _getAllPositiveExampleIndices(self):
         # initialize dictionary for positive example indices
+        print 'Generating all example indices...'
         pDict = {}
+        to_do = float(len(self.groupIdx));
         # for every data index
+        pct_done_prev = -5.0;
         for i in self.groupIdx:
+            pct_done = 100.0*float(i)/to_do;
+            if (pct_done - pct_done_prev) >= 5.0:
+                print str(np.around(pct_done, 0)) + '% generated'
+                pct_done_prev = pct_done;
             # get the number of patches at the data index
             numPatch = data[str(i)].shape[0]
             # create a list of the patch indices

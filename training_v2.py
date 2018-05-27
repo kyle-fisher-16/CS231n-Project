@@ -4,7 +4,9 @@ import numpy as np
 import os
 import h5py
 from dataset import Dataset
+from constants import GaussianKernel5x5
 import matplotlib.pyplot as plt
+
 
 # Global Constants
 IMG_W = 64;
@@ -123,12 +125,38 @@ def get_val_acc(sess_ref, dset_ref):
     return val_acc_stats
 
 
+# this is a vanilla tf function which applys gaussian subnorm
+def apply_guassian_subnorm_ch(x):
+    # x is (IMG_W, IMG_H, filts)
+    
+    # x_reshaped becomes (filts, IMG_W, IMG_H)
+    x_reshaped = tf.transpose(x, [2, 0, 1]);
+    
+    # sh is (filts, IMG_W, IMG_H)
+    sh = tf.shape(x_reshaped);
+     
+    # x_reshaped becomes (filts, IMG_W, IMG_H, 1)
+    x_reshaped = tf.reshape(x, (sh[0], sh[1], sh[2], 1));
+
+    # apply the filter kernel
+    global GaussianKernel5x5;
+    result = x_reshaped - tf.nn.conv2d(x_reshaped, GaussianKernel5x5, strides=(1, 1, 1, 1), padding="SAME");
+
+    # result shape is now (filts, IMG_W, IMG_H, 1). need to fix.
+    # make result be (filts, IMG_W, IMG_H)
+    result = tf.reshape(result, sh)
+    result = tf.transpose(x, [1, 2, 0]);
+    
+    return result;
+
+
+
 class SiameseNet(tf.keras.Model):
 
     def __init__(self):
         super(SiameseNet, self).__init__()
-        initializer = tf.variance_scaling_initializer(scale=2.0)
-        #initializer = tf.initializers.random_normal(stddev=2.0)
+#        initializer = tf.variance_scaling_initializer(scale=2.0)
+        initializer = tf.initializers.random_normal(stddev=2.0)
         self.conv1 = tf.layers.Conv2D(filters = 32, kernel_size = (7, 7), strides = (2, 2), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
         self.pool1 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
 #        self.norm1 = tf.layers.BatchNormalization(axis = 0, momentum = 0.99, epsilon = 1.0E-7)
@@ -139,15 +167,7 @@ class SiameseNet(tf.keras.Model):
 
         self.conv3 = tf.layers.Conv2D(filters = 128, kernel_size = (5, 5), strides = (4, 4), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
         self.pool3 = tf.layers.MaxPooling2D(pool_size = (4, 4), padding = "SAME", strides = (4, 4))
-        Kernel = 1. / 115 * np.array([[2, 4, 5, 4, 2],
-                                      [4, 9, 12, 9, 4],
-                                      [5, 12, 15, 12, 5],
-                                      [4, 9, 12, 9, 4],
-                                      [2, 4, 5, 4, 2]])
-        Kernel = np.reshape(Kernel, (5, 5, 1, 1))
-        self.GaussianKernel32 = np.tile(Kernel, (1, 1, 32, 32))
-        self.GaussianKernel64 = np.tile(Kernel, (1, 1, 64, 64))
-    
+
     
     # apply convnet; operates only on one of the left/right channels at a time.
     def apply_convnet(self, x):
@@ -155,13 +175,13 @@ class SiameseNet(tf.keras.Model):
         # CNN architecture
         x_out = self.conv1(x)
         x_out = self.apply_L2_Pool(x_out, 2, 2)
-        x_out = self.apply_guassian_subnorm(x_out, self.GaussianKernel32)
+        x_out = self.apply_guassian_subnorm(x_out)
         
         #x_out = self.norm1(x_out)
         
         x_out = self.conv2(x_out)
         x_out = self.apply_L2_Pool(x_out, 3, 3)
-        x_out = self.apply_guassian_subnorm(x_out, self.GaussianKernel64)
+        x_out = self.apply_guassian_subnorm(x_out)
         
         x_out = self.conv3(x_out)
         x_out = self.apply_L2_Pool(x_out, 4, 4)
@@ -170,9 +190,11 @@ class SiameseNet(tf.keras.Model):
         x_out = tf.layers.flatten(x_out);
         return x_out;
     
+
     # spatial guassian subtractive normalization w/ 5x5xFxF kernel
-    def apply_guassian_subnorm(self, x_in, kernel):
-        sub = tf.nn.conv2d(x_in, kernel, strides=(1, 1, 1, 1), padding="SAME")
+    def apply_guassian_subnorm(self, x_in):
+        # x_in starts as (batch_sz, IMG_W, IMG_H, filts)
+        return tf.map_fn(apply_guassian_subnorm_ch, x_in);
         return x_in - sub;
     
     def apply_L2_Pool(self, x, window, stride):

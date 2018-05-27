@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 # Global Constants
 IMG_W = 64;
 IMG_H = 64;
-PLOT_BATCH = False; # whether or not to plot the batch distances
-dataset_limit = 20000; # limit the input dataset (for debugging)
+PLOT_BATCH = True; # whether or not to plot the batch distances
+dataset_limit = 1000; # limit the input dataset (for debugging)
 
 # ====== HYPERPARAMS ======
 mining_ratio = 8;
@@ -128,6 +128,7 @@ class SiameseNet(tf.keras.Model):
     def __init__(self):
         super(SiameseNet, self).__init__()
         initializer = tf.variance_scaling_initializer(scale=2.0)
+        #initializer = tf.initializers.random_normal(stddev=2.0)
         self.conv1 = tf.layers.Conv2D(filters = 32, kernel_size = (7, 7), strides = (2, 2), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
         self.pool1 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
         self.norm1 = tf.layers.BatchNormalization(axis = 0, momentum = 0.99, epsilon = 1.0E-7)
@@ -138,26 +139,40 @@ class SiameseNet(tf.keras.Model):
         
         self.conv3 = tf.layers.Conv2D(filters = 128, kernel_size = (5, 5), strides = (4, 4), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
         self.pool3 = tf.layers.MaxPooling2D(pool_size = (4, 4), padding = "SAME", strides = (4, 4))
+        Kernel = 1. / 115 * np.array([[2, 4, 5, 4, 2],
+                                              [4, 9, 12, 9, 4],
+                                              [5, 12, 15, 12, 5],
+                                              [4, 9, 12, 9, 4],
+                                              [2, 4, 5, 4, 2]])
+        Kernel = np.reshape(Kernel, (5, 5, 1, 1))
+        self.GaussianFilter = np.tile(Kernel, (1, 1, 32, 32))
     
     # apply convnet; operates only on one of the left/right channels at a time.
     def apply_convnet(self, x):
 
         # CNN architecture
-        
         x_out = self.conv1(x)
-        x_out = self.pool1(x_out)
-        x_out = self.norm1(x_out)
+        x_out = self.apply_L2_Pool(x_out, 2, 2)
+        sub = tf.nn.conv2d(x_out, self.GaussianFilter, strides=(1, 1, 1, 1), padding="SAME")
+        x_out = x_out - sub
+        
+        #x_out = self.norm1(x_out)
         
         x_out = self.conv2(x_out)
-        x_out = self.pool2(x_out)
+        x_out = self.apply_L2_Pool(x_out, 3, 3)
         x_out = self.norm2(x_out)
         
         x_out = self.conv3(x_out)
-        x_out = self.pool3(x_out)
+        x_out = self.apply_L2_Pool(x_out, 4, 4)
         
         # flatten because at the end we want a single descriptor per input
         x_out = tf.layers.flatten(x_out);
         return x_out;
+    
+    def apply_L2_Pool(self, x, window, stride):
+        return tf.nn.max_pool(value=x, ksize=(1, window, window, 1), strides=(1, stride, stride, 1), padding="SAME")
+        #return tf.sqrt(tf.nn.avg_pool(value=tf.square(x), ksize=(1, window, window, 1), strides=(1, stride, stride, 1), padding="SAME"))
+        #return tf.nn.max_pool(value=tf.square(x), ksize=(1, window, window, 1), strides=(1, stride, stride, 1), padding="SAME")
     
     # execute the siamese net
     def call(self, x, training=None):

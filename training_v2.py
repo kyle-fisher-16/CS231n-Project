@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 IMG_W = 64;
 IMG_H = 64;
 PLOT_BATCH = False; # whether or not to plot the batch distances
-dataset_limit = 20000; # limit the input dataset (for debugging)
+dataset_limit = 1000; # limit the input dataset (for debugging)
 
 # ====== HYPERPARAMS ======
 mining_ratio = 8;
@@ -22,6 +22,9 @@ pct_validation = 10.0;
 # ====== LOAD DATA ======
 data = h5py.File('data/liberty.h5', 'r')
 #training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=3000);
+
+# ===== TB SUMMARY DIR ======
+tb_sum_dir = 'results/network/'
 
 # ====== SETUP ======
 if PLOT_BATCH:
@@ -191,10 +194,13 @@ with tf.device('/cpu:0'):
     dists_out = SiameseNet()(x);
     loss_vector_calc = hinge_embed_loss_func(y, dists_out);
     loss_scalar_calc = tf.reduce_mean(loss_vector_calc)
+    # save loss output for tensorboard:
+    tf.summary.scalar('loss', loss_scalar_calc)
     optimizer = tf.train.AdamOptimizer(learning_rate)
     grads = optimizer.compute_gradients(loss_scalar_calc)
     capped_grads = [(tf.clip_by_value(grad, -1.0, 1.0), var) for grad, var in grads]
     train_op = optimizer.apply_gradients(capped_grads)
+    merged = tf.summary.merge_all()
 
 def mine_one_batch(session_ref, dataset_ref):
     X_unmined = np.zeros((0, 4), dtype="uint32")
@@ -241,6 +247,7 @@ def mine_one_batch(session_ref, dataset_ref):
 # TODO: look into is_training flag, usually passed into feed_dict
 # Run computational graph
 with tf.Session() as sess:
+    tb_train_writer = tf.summary.FileWriter(tb_sum_dir, sess.graph)
     sess.run(tf.global_variables_initializer())
     step = 1;
     plt.ion()
@@ -273,7 +280,9 @@ with tf.Session() as sess:
             train_stats = check_accuracy(dists_out_np, y_mined)
 
             # do training step
-            loss_output, _ = sess.run([loss_scalar_calc, train_op], feed_dict=feed_dict)
+            loss_output, summary, _ = sess.run([loss_scalar_calc, merged, train_op], feed_dict=feed_dict)
+            tb_train_writer.add_summary(summary)
+            tb_train_writer.flush()
 
             # training progress log
             print 'Step', ('%6s' % step), '  |  ', \

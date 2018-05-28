@@ -191,6 +191,11 @@ tf.reset_default_graph()
 with tf.device('/cpu:0'):
     x = tf.placeholder(tf.float32, [None, 2, IMG_W, IMG_H])
     y = tf.placeholder(tf.float32, [None])
+    # place holders for graph stuff??
+    train_acc_tf = tf.placeholder(tf.float32)
+    tf.summary.scalar("Training Accuracy", train_acc_tf)
+    val_acc_tf = tf.placeholder(tf.float32)
+    tf.summary.scalar("Validation Accuracy", val_acc_tf)
     dists_out = SiameseNet()(x);
     loss_vector_calc = hinge_embed_loss_func(y, dists_out);
     loss_scalar_calc = tf.reduce_mean(loss_vector_calc)
@@ -250,6 +255,7 @@ with tf.Session() as sess:
     tb_train_writer = tf.summary.FileWriter(tb_sum_dir, sess.graph)
     sess.run(tf.global_variables_initializer())
     step = 1;
+    val_acc_stats = {'acc': 0.0}
     plt.ion()
     ct = 0;
     
@@ -273,18 +279,25 @@ with tf.Session() as sess:
         
         # ======= TRAINING =======
         for X_mined, y_mined in mined_batches:
-            feed_dict = {x: training_dset.fetchImageData(X_mined), y: y_mined }
+            feed_dict = {x: training_dset.fetchImageData(X_mined),
+                         y: y_mined}
             
             # check accuracy for this step
             dists_out_np = sess.run(dists_out, feed_dict=feed_dict)
             train_stats = check_accuracy(dists_out_np, y_mined)
-
+ 
             # do training step
+            feed_dict = {x: training_dset.fetchImageData(X_mined),
+                        y: y_mined,
+                        train_acc_tf: 100.0*train_stats['acc'],
+                        val_acc_tf: 100.0*val_acc_stats['acc']}
+
             loss_output, summary, _ = sess.run([loss_scalar_calc, merged, train_op], feed_dict=feed_dict)
             tb_train_writer.add_summary(summary)
             tb_train_writer.flush()
 
-            # training progress log
+            # ======= LOGGING =======
+            # print out to console
             print 'Step', ('%6s' % step), '  |  ', \
                     'Loss', ('%6s' % str(np.around(loss_output, 3))), '  |  ', \
                     'Training Acc', (('%6s' % np.around(100.0*train_stats['acc'], 1)) + '%'), '  |  ', \

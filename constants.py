@@ -1,10 +1,8 @@
 import numpy as np
 
-GaussianKernel5x5 = np.array([[2, 4, 5, 4, 2],
-         [4, 9, 12, 9, 4],
-         [5, 12, 15, 12, 5],
-         [4, 9, 12, 9, 4],
-         [2, 4, 5, 4, 2]], dtype="float32");
-
-GaussianKernel5x5 /= np.sum(np.sum(GaussianKernel5x5))
+GaussianKernel5x5 = 1. / 256 * np.array([[1, 4, 6, 4, 1],
+                                         [4, 16, 24, 16, 4],
+                                         [6, 24, 36, 24, 6],
+                                         [4, 16, 24, 16, 4],
+                                         [1, 4, 6, 4, 1]], dtype="float32");
 GaussianKernel5x5 = np.reshape(GaussianKernel5x5, (5, 5, 1, 1))

@@ -23,6 +23,12 @@ batch_sz = int(os.getenv('CS231N_BATCH_SZ', 128))
 num_epochs = int(os.getenv('CS231N_NUM_EPOCHS', 1000))
 learning_rate = float(os.getenv('CS231N_LEARNING_RATE', 5e-5))
 pct_validation = float(os.getenv('CS231N_PCT_VALIDATION', 10.0))
+pooling_type = str(os.getenv('CS231N_POOLING_TYPE', 'l2')).lower() # l2 or max
+init_stddev = float(os.getenv('CS231N_INIT_STDDEV', 0.5))
+
+if (not (pooling_type=='l2' or pooling_type=='max')):
+    raise ValueError('Environment variable CS231N_POOLING_TYPE must be "l2" or "max"');
+
 
 print
 print '===== ENVIRONMENT VARIABLES ====='
@@ -30,9 +36,11 @@ print 'Plotting Enabled:', PLOT_BATCH
 print 'Dataset Limit:', dataset_limit, 'examples'
 print 'Mining Ratio:', mining_ratio
 print 'Batch Size:', batch_sz
+print 'Pooling Type:', pooling_type
 print 'Number of Epochs:', num_epochs
 print 'Learning Rate:', learning_rate
 print 'Percent for Validation:', (str(pct_validation) + '%')
+print 'Initialization Std. Dev.:', init_stddev
 print
 
 # ====== LOAD DATA ======
@@ -146,13 +154,13 @@ def get_val_acc(sess_ref, dset_ref):
 def apply_guassian_subnorm_ch(x):
     
     # x is (IMG_W, IMG_H, filts)
-
+    
     # x_reshaped becomes (filts, IMG_W, IMG_H)
     x_reshaped = tf.transpose(x, [2, 0, 1]);
-
+    
     # sh is (filts, IMG_W, IMG_H)
     sh = tf.shape(x_reshaped);
-
+    
     # x_reshaped becomes (filts, IMG_W, IMG_H, 1)
     x_reshaped = tf.reshape(x_reshaped, (sh[0], sh[1], sh[2], 1));
     
@@ -162,14 +170,12 @@ def apply_guassian_subnorm_ch(x):
     # apply the filter kernel
     global GaussianKernel5x5;
     result = x_reshaped - tf.nn.conv2d(x_padded, GaussianKernel5x5, strides=(1, 1, 1, 1), padding="VALID");
-
+    
     # result shape is now (filts, IMG_W, IMG_H, 1). need to fix.
     # make result be (filts, IMG_W, IMG_H)
     result = tf.reshape(result, sh)
     result = tf.transpose(result, [1, 2, 0]);
     
-    result = tf.Print(result, [tf.shape(result)], message="apply_guassian_subnorm_ch shape")
-
     return result;
 
 
@@ -178,39 +184,56 @@ class SiameseNet(tf.keras.Model):
 
     def __init__(self):
         super(SiameseNet, self).__init__()
-        initializer = tf.initializers.random_normal(stddev=1.0)
+        initializer = tf.initializers.random_normal(stddev=init_stddev)
         self.conv1 = tf.layers.Conv2D(filters = 32, kernel_size = (7, 7), strides = (2, 2), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
-        self.pool1 = tf.layers.AveragePooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
+        self.avg_pool1 = tf.layers.AveragePooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
+        self.max_pool1 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
 
         self.conv2 = tf.layers.Conv2D(filters = 64, kernel_size = (6, 6), strides = (3, 3), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
-        self.pool2 = tf.layers.AveragePooling2D(pool_size = (3, 3), padding = "SAME", strides = (3, 3))
+        self.avg_pool2 = tf.layers.AveragePooling2D(pool_size = (3, 3), padding = "SAME", strides = (3, 3))
+        self.max_pool2 = tf.layers.MaxPooling2D(pool_size = (3, 3), padding = "SAME", strides = (3, 3))
 
         self.conv3 = tf.layers.Conv2D(filters = 128, kernel_size = (5, 5), strides = (4, 4), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
-        self.pool3 = tf.layers.AveragePooling2D(pool_size = (4, 4), padding = "SAME", strides = (4, 4))
+        self.avg_pool3 = tf.layers.AveragePooling2D(pool_size = (4, 4), padding = "SAME", strides = (4, 4))
+        self.max_pool3 = tf.layers.MaxPooling2D(pool_size = (4, 4), padding = "SAME", strides = (4, 4))
 
     
     # apply convnet; operates only on one of the left/right channels at a time.
     def apply_convnet(self, x):
 
         # CNN architecture
+        
+        # LAYER 1
         x_out = self.conv1(x)
-        x_out = self.apply_L2_Pool(x_out, self.pool1)
+        if (pooling_type=='l2'):
+            x_out = self.apply_L2_Pool(x_out, self.avg_pool1)
+        elif (pooling_type=='max'):
+            x_out = self.max_pool1(x_out)
         x_out = self.apply_guassian_subnorm(x_out)
         
-        #x_out = self.norm1(x_out)
+        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape")
         
+        # LAYER 2
         x_out = self.conv2(x_out)
-        x_out = self.apply_L2_Pool(x_out, self.pool2)
+        if (pooling_type=='l2'):
+            x_out = self.apply_L2_Pool(x_out, self.avg_pool2)
+        elif (pooling_type=='max'):
+            x_out = self.max_pool2(x_out)
         x_out = self.apply_guassian_subnorm(x_out)
         
+        # LAYER 3
         x_out = self.conv3(x_out)
-        x_out = self.apply_L2_Pool(x_out, self.pool3)
+        if (pooling_type=='l2'):
+            x_out = self.apply_L2_Pool(x_out, self.avg_pool3)
+        elif (pooling_type=='max'):
+            x_out = self.max_pool3(x_out)
         
         # flatten because at the end we want a single descriptor per input
         x_out = tf.layers.flatten(x_out);
+
         return x_out;
     
-
+    
     # spatial guassian subtractive normalization w/ 5x5xFxF kernel
     def apply_guassian_subnorm(self, x_in):
         # x_in starts as (batch_sz, IMG_W, IMG_H, filts)

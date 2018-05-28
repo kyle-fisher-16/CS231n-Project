@@ -8,18 +8,31 @@ from constants import GaussianKernel5x5
 import matplotlib.pyplot as plt
 
 
+
 # Global Constants
 IMG_W = 64;
 IMG_H = 64;
-PLOT_BATCH = False; # whether or not to plot the batch distances
-dataset_limit = 1000; # limit the input dataset (for debugging)
+
 
 # ====== HYPERPARAMS ======
-mining_ratio = 8;
-batch_sz = 128;
-num_epochs = 1000;
-learning_rate = 5e-5;
-pct_validation = 10.0;
+PLOT_BATCH = bool(os.getenv('CS231N_PLOT_BATCH', False)); # whether or not to plot the batch distances
+dataset_limit = int(os.getenv('CS231N_DATASET_LIMIT', 100000000)); # limit the input dataset (for debugging)
+mining_ratio = int(os.getenv('CS231N_MINING_RATIO', 8))
+batch_sz = int(os.getenv('CS231N_BATCH_SZ', 128))
+num_epochs = int(os.getenv('CS231N_NUM_EPOCHS', 1000))
+learning_rate = float(os.getenv('CS231N_LEARNING_RATE', 5e-5))
+pct_validation = float(os.getenv('CS231N_PCT_VALIDATION', 10.0))
+
+print
+print '===== ENVIRONMENT VARIABLES ====='
+print 'Plotting Enabled:', PLOT_BATCH
+print 'Dataset Limit:', dataset_limit, 'examples'
+print 'Mining Ratio:', mining_ratio
+print 'Batch Size:', batch_sz
+print 'Number of Epochs:', num_epochs
+print 'Learning Rate:', learning_rate
+print 'Percent for Validation:', (str(pct_validation) + '%')
+print
 
 # ====== LOAD DATA ======
 data = h5py.File('data/liberty.h5', 'r')

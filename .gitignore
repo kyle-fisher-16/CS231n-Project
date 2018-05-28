@@ -2,4 +2,4 @@ data/**
 *.pyc
 .DS_Store
 results/**
-train.sh
+train_*.sh

@@ -4,7 +4,9 @@ import numpy as np
 import os
 import h5py
 from dataset import Dataset
+from constants import GaussianKernel5x5
 import matplotlib.pyplot as plt
+
 
 # Global Constants
 IMG_W = 64;
@@ -126,41 +128,82 @@ def get_val_acc(sess_ref, dset_ref):
     return val_acc_stats
 
 
+# this is a vanilla tf function which applys gaussian subnorm
+def apply_guassian_subnorm_ch(x):
+    # x is (IMG_W, IMG_H, filts)
+    
+    # x_reshaped becomes (filts, IMG_W, IMG_H)
+    x_reshaped = tf.transpose(x, [2, 0, 1]);
+    
+    # sh is (filts, IMG_W, IMG_H)
+    sh = tf.shape(x_reshaped);
+     
+    # x_reshaped becomes (filts, IMG_W, IMG_H, 1)
+    x_reshaped = tf.reshape(x, (sh[0], sh[1], sh[2], 1));
+
+    # apply the filter kernel
+    global GaussianKernel5x5;
+    result = x_reshaped - tf.nn.conv2d(x_reshaped, GaussianKernel5x5, strides=(1, 1, 1, 1), padding="SAME");
+
+    # result shape is now (filts, IMG_W, IMG_H, 1). need to fix.
+    # make result be (filts, IMG_W, IMG_H)
+    result = tf.reshape(result, sh)
+    result = tf.transpose(x, [1, 2, 0]);
+    
+    return result;
+
+
+
 class SiameseNet(tf.keras.Model):
 
     def __init__(self):
         super(SiameseNet, self).__init__()
-        initializer = tf.variance_scaling_initializer(scale=2.0)
+#        initializer = tf.variance_scaling_initializer(scale=2.0)
+        initializer = tf.initializers.random_normal(stddev=2.0)
         self.conv1 = tf.layers.Conv2D(filters = 32, kernel_size = (7, 7), strides = (2, 2), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
         self.pool1 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
-        self.norm1 = tf.layers.BatchNormalization(axis = 0, momentum = 0.99, epsilon = 1.0E-7)
-        
+#        self.norm1 = tf.layers.BatchNormalization(axis = 0, momentum = 0.99, epsilon = 1.0E-7)
+
         self.conv2 = tf.layers.Conv2D(filters = 64, kernel_size = (6, 6), strides = (3, 3), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
         self.pool2 = tf.layers.MaxPooling2D(pool_size = (3, 3), padding = "SAME", strides = (3, 3))
-        self.norm2 = tf.layers.BatchNormalization(axis = 0, momentum = 0.99, epsilon = 1.0E-7)
-        
+#        self.norm2 = tf.layers.BatchNormalization(axis = 0, momentum = 0.99, epsilon = 1.0E-7)
+
         self.conv3 = tf.layers.Conv2D(filters = 128, kernel_size = (5, 5), strides = (4, 4), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
         self.pool3 = tf.layers.MaxPooling2D(pool_size = (4, 4), padding = "SAME", strides = (4, 4))
+
     
     # apply convnet; operates only on one of the left/right channels at a time.
     def apply_convnet(self, x):
 
         # CNN architecture
-        
         x_out = self.conv1(x)
-        x_out = self.pool1(x_out)
-        x_out = self.norm1(x_out)
+        x_out = self.apply_L2_Pool(x_out, 2, 2)
+        x_out = self.apply_guassian_subnorm(x_out)
+        
+        #x_out = self.norm1(x_out)
         
         x_out = self.conv2(x_out)
-        x_out = self.pool2(x_out)
-        x_out = self.norm2(x_out)
+        x_out = self.apply_L2_Pool(x_out, 3, 3)
+        x_out = self.apply_guassian_subnorm(x_out)
         
         x_out = self.conv3(x_out)
-        x_out = self.pool3(x_out)
+        x_out = self.apply_L2_Pool(x_out, 4, 4)
         
         # flatten because at the end we want a single descriptor per input
         x_out = tf.layers.flatten(x_out);
         return x_out;
+    
+
+    # spatial guassian subtractive normalization w/ 5x5xFxF kernel
+    def apply_guassian_subnorm(self, x_in):
+        # x_in starts as (batch_sz, IMG_W, IMG_H, filts)
+        return tf.map_fn(apply_guassian_subnorm_ch, x_in);
+        return x_in - sub;
+    
+    def apply_L2_Pool(self, x, window, stride):
+        return tf.nn.max_pool(value=x, ksize=(1, window, window, 1), strides=(1, stride, stride, 1), padding="SAME")
+        #return tf.sqrt(tf.nn.avg_pool(value=tf.square(x), ksize=(1, window, window, 1), strides=(1, stride, stride, 1), padding="SAME"))
+        #return tf.nn.max_pool(value=tf.square(x), ksize=(1, window, window, 1), strides=(1, stride, stride, 1), padding="SAME")
     
     # execute the siamese net
     def call(self, x, training=None):

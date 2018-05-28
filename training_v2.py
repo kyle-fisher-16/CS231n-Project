@@ -6,6 +6,7 @@ import h5py
 from dataset import Dataset
 from constants import GaussianKernel5x5
 import matplotlib.pyplot as plt
+import cv2
 
 
 
@@ -143,26 +144,32 @@ def get_val_acc(sess_ref, dset_ref):
 
 # this is a vanilla tf function which applys gaussian subnorm
 def apply_guassian_subnorm_ch(x):
-    # x is (IMG_W, IMG_H, filts)
     
+    # x is (IMG_W, IMG_H, filts)
+
     # x_reshaped becomes (filts, IMG_W, IMG_H)
     x_reshaped = tf.transpose(x, [2, 0, 1]);
-    
+
     # sh is (filts, IMG_W, IMG_H)
     sh = tf.shape(x_reshaped);
-     
-    # x_reshaped becomes (filts, IMG_W, IMG_H, 1)
-    x_reshaped = tf.reshape(x, (sh[0], sh[1], sh[2], 1));
 
+    # x_reshaped becomes (filts, IMG_W, IMG_H, 1)
+    x_reshaped = tf.reshape(x_reshaped, (sh[0], sh[1], sh[2], 1));
+    
+    paddings = tf.constant([[0,0],[2,2],[2,2], [0,0]])
+    x_padded = tf.pad(x_reshaped, paddings, "SYMMETRIC")
+    
     # apply the filter kernel
     global GaussianKernel5x5;
-    result = x_reshaped - tf.nn.conv2d(x_reshaped, GaussianKernel5x5, strides=(1, 1, 1, 1), padding="SAME");
+    result = x_reshaped - tf.nn.conv2d(x_padded, GaussianKernel5x5, strides=(1, 1, 1, 1), padding="VALID");
 
     # result shape is now (filts, IMG_W, IMG_H, 1). need to fix.
     # make result be (filts, IMG_W, IMG_H)
     result = tf.reshape(result, sh)
-    result = tf.transpose(x, [1, 2, 0]);
+    result = tf.transpose(result, [1, 2, 0]);
     
+    result = tf.Print(result, [tf.shape(result)], message="apply_guassian_subnorm_ch shape")
+
     return result;
 
 
@@ -208,7 +215,6 @@ class SiameseNet(tf.keras.Model):
     def apply_guassian_subnorm(self, x_in):
         # x_in starts as (batch_sz, IMG_W, IMG_H, filts)
         return tf.map_fn(apply_guassian_subnorm_ch, x_in);
-        return x_in - sub;
     
     def apply_L2_Pool(self, x, pooler_layer_ref):
         out = tf.square(x)
@@ -223,21 +229,24 @@ class SiameseNet(tf.keras.Model):
         
         # for conv2d, we need the dims to be ordered (batch_sz, img_w, img_h, channel)
         xL = tf.transpose(xL, [0, 2, 3, 1])
-        xR = tf.transpose(xR, [0, 2, 3, 1])
-
-        # Convnet
-        xL = self.apply_convnet(xL)
-        xR = self.apply_convnet(xR)
         
-        # Slightly perturb one of these so they can't be identical
-        xL = tf.add(xL, 0.0001);
-        
-        # compute distance; we will pass this to the loss function
-        dist_sq = tf.subtract(xL, xR);
-        dist_sq = tf.multiply(dist_sq, dist_sq);
-        dist_sq = tf.reduce_sum(dist_sq, axis=1)#, keepdims=True);
-        dist = tf.sqrt(dist_sq);
-        return dist
+        xL_subnormed = self.apply_guassian_subnorm(xL);
+#
+#        xR = tf.transpose(xR, [0, 2, 3, 1])
+#
+#        # Convnet
+#        xL = self.apply_convnet(xL)
+#        xR = self.apply_convnet(xR)
+#
+#        # Slightly perturb one of these so they can't be identical
+#        xL = tf.add(xL, 0.0001);
+#
+#        # compute distance; we will pass this to the loss function
+#        dist_sq = tf.subtract(xL, xR);
+#        dist_sq = tf.multiply(dist_sq, dist_sq);
+#        dist_sq = tf.reduce_sum(dist_sq, axis=1)#, keepdims=True);
+#        dist = tf.sqrt(dist_sq);
+        return xL_subnormed
 
 # ====== TRAINING ======
 # Construct computational graph
@@ -250,16 +259,20 @@ with tf.device('/cpu:0'):
     tf.summary.scalar("Training Accuracy", train_acc_tf)
     val_acc_tf = tf.placeholder(tf.float32)
     tf.summary.scalar("Validation Accuracy", val_acc_tf)
-    dists_out = SiameseNet()(x);
-    loss_vector_calc = hinge_embed_loss_func(y, dists_out);
-    loss_scalar_calc = tf.reduce_mean(loss_vector_calc)
-    # save loss output for tensorboard:
-    tf.summary.scalar('loss', loss_scalar_calc)
-    optimizer = tf.train.AdamOptimizer(learning_rate)
-    grads = optimizer.compute_gradients(loss_scalar_calc)
-    capped_grads = [(tf.clip_by_value(grad, -1.0, 1.0), var) for grad, var in grads]
-    train_op = optimizer.apply_gradients(capped_grads)
-    merged = tf.summary.merge_all()
+    s_net = SiameseNet();
+    dists_out = s_net(x);
+#    loss_vector_calc = hinge_embed_loss_func(y, dists_out);
+#    loss_scalar_calc = tf.reduce_mean(loss_vector_calc)
+#
+#
+#
+#    # save loss output for tensorboard:
+#    tf.summary.scalar('loss', loss_scalar_calc)
+#    optimizer = tf.train.AdamOptimizer(learning_rate)
+#    grads = optimizer.compute_gradients(loss_scalar_calc)
+#    capped_grads = [(tf.clip_by_value(grad, -1.0, 1.0), var) for grad, var in grads]
+#    train_op = optimizer.apply_gradients(capped_grads)
+#    merged = tf.summary.merge_all()
 
 def mine_one_batch(session_ref, dataset_ref):
     X_unmined = np.zeros((0, 4), dtype="uint32")
@@ -312,56 +325,79 @@ with tf.Session() as sess:
     val_acc_stats = {'acc': 0.0}
     plt.ion()
     ct = 0;
+
+    training_dset = Dataset(data,batch_sz, pct_for_val=pct_validation, max_dataset_size=dataset_limit);
+    X_batch, y_batch, pct_complete = training_dset.next()
+    X_batch_imgs = training_dset.fetchImageData(X_batch);
+    cv2.imwrite("img1.png", X_batch_imgs[1,0].reshape((64,64)))
+
+    feed_dict = {x: X_batch_imgs, y: y_batch}
+    xL_out_np = sess.run(dists_out, feed_dict=feed_dict)
+    xL_out_np = xL_out_np[1].reshape((64, 64));
+    print xL_out_np.shape
+    xL_out_np = np.abs(xL_out_np)
     
-    for epoch_num in range(1,num_epochs+1, 1):
-        print 'BEGINNING EPOCH #' + str(epoch_num)
-        
+    cv2.imwrite("img2.png", xL_out_np)
+    
+    print xL_out_np.shape
 
-        # use 10% of dset for validation
-        training_dset = Dataset(data,batch_sz, pct_for_val=pct_validation, max_dataset_size=dataset_limit);
-        
-        # ======= MINING =======
-        print 'Mining...'
-        mined_batches = [] # set of mined batches
-        while True:
-            X_batch, y_batch, pct_complete = mine_one_batch(sess, training_dset)
-            if X_batch is None:
-                break;
-            print str(np.around(pct_complete, 1)) + '% mined'
-            mined_batches.append((X_batch, y_batch))
-        print 'Done mining!'
-        
-        # ======= TRAINING =======
-        for X_mined, y_mined in mined_batches:
-            feed_dict = {x: training_dset.fetchImageData(X_mined),
-                         y: y_mined}
-            
-            # check accuracy for this step
-            dists_out_np = sess.run(dists_out, feed_dict=feed_dict)
-            train_stats = check_accuracy(dists_out_np, y_mined)
- 
-            # do training step
-            feed_dict = {x: training_dset.fetchImageData(X_mined),
-                        y: y_mined,
-                        train_acc_tf: 100.0*train_stats['acc'],
-                        val_acc_tf: 100.0*val_acc_stats['acc']}
+    
+#    for epoch_num in range(1,num_epochs+1, 1):
+#        print 'BEGINNING EPOCH #' + str(epoch_num)
+#
+#
+#        # use 10% of dset for validation
+#        training_dset = Dataset(data,batch_sz, pct_for_val=pct_validation, max_dataset_size=dataset_limit);
+#
+#        # ======= MINING =======
+#        print 'Mining...'
+#        mined_batches = [] # set of mined batches
+#        while True:
+#            X_batch, y_batch, pct_complete = mine_one_batch(sess, training_dset)
+#            if X_batch is None:
+#                break;
+#            print str(np.around(pct_complete, 1)) + '% mined'
+#            mined_batches.append((X_batch, y_batch))
+#        print 'Done mining!'
+#
+#        # ======= TRAINING =======
+#        for X_mined, y_mined in mined_batches:
+#            feed_dict = {x: training_dset.fetchImageData(X_mined),
+#                         y: y_mined}
+#
+#            # check accuracy for this step
+#            dists_out_np = sess.run(dists_out, feed_dict=feed_dict)
+#            train_stats = check_accuracy(dists_out_np, y_mined)
+#
+#            # do training step
+#            feed_dict = {x: training_dset.fetchImageData(X_mined),
+#                        y: y_mined,
+#                        train_acc_tf: 100.0*train_stats['acc'],
+#                        val_acc_tf: 100.0*val_acc_stats['acc']}
+#
+#            loss_output, summary, _ = sess.run([loss_scalar_calc, merged, train_op], feed_dict=feed_dict)
+#            tb_train_writer.add_summary(summary)
+#            tb_train_writer.flush()
+#
+#            # ======= LOGGING =======
+#            # print out to console
+#            print 'Step', ('%6s' % step), '  |  ', \
+#                    'Loss', ('%6s' % str(np.around(loss_output, 3))), '  |  ', \
+#                    'Training Acc', (('%6s' % np.around(100.0*train_stats['acc'], 1)) + '%'), '  |  ', \
+#                    'Avg Dist', ('%6s' % np.around(train_stats['avg_dist'], 3))
+#
+#            if np.isnan(loss_output):
+#                break;
+#            step += 1
+#
+#            # GUASS TEST
+#            xL_subnormed_np, xL_np = sess.run([xL_subnormed, xL], feed_dict=feed_dict)
+#            print 'xL_subnormed_np.shape', xL_subnormed_np.shape
+#            print 'xL_np.shape', xL_np.shape
+#            quit()
+#
+#        # check validation accuracy
+#        val_acc_stats = get_val_acc(sess, training_dset)
+#        print 'END EPOCH #' + str(epoch_num), '  |  ',\
+#            'Validation Acc', (('%6s' % np.around(100.0*val_acc_stats['acc'], 1)) + '%')
 
-            loss_output, summary, _ = sess.run([loss_scalar_calc, merged, train_op], feed_dict=feed_dict)
-            tb_train_writer.add_summary(summary)
-            tb_train_writer.flush()
-
-            # ======= LOGGING =======
-            # print out to console
-            print 'Step', ('%6s' % step), '  |  ', \
-                    'Loss', ('%6s' % str(np.around(loss_output, 3))), '  |  ', \
-                    'Training Acc', (('%6s' % np.around(100.0*train_stats['acc'], 1)) + '%'), '  |  ', \
-                    'Avg Dist', ('%6s' % np.around(train_stats['avg_dist'], 3))
-
-            if np.isnan(loss_output):
-                break;
-            step += 1
-
-        # check validation accuracy
-        val_acc_stats = get_val_acc(sess, training_dset)
-        print 'END EPOCH #' + str(epoch_num), '  |  ',\
-            'Validation Acc', (('%6s' % np.around(100.0*val_acc_stats['acc'], 1)) + '%')

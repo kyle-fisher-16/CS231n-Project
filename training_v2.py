@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 # Global Constants
 IMG_W = 64;
 IMG_H = 64;
-PLOT_BATCH = True; # whether or not to plot the batch distances
+PLOT_BATCH = False; # whether or not to plot the batch distances
 dataset_limit = 1000; # limit the input dataset (for debugging)
 
 # ====== HYPERPARAMS ======
@@ -24,6 +24,9 @@ pct_validation = 10.0;
 # ====== LOAD DATA ======
 data = h5py.File('data/liberty.h5', 'r')
 #training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=3000);
+
+# ===== TB SUMMARY DIR ======
+tb_sum_dir = 'results/network/'
 
 # ====== SETUP ======
 if PLOT_BATCH:
@@ -231,13 +234,21 @@ tf.reset_default_graph()
 with tf.device('/cpu:0'):
     x = tf.placeholder(tf.float32, [None, 2, IMG_W, IMG_H])
     y = tf.placeholder(tf.float32, [None])
+    # place holders for graph stuff??
+    train_acc_tf = tf.placeholder(tf.float32)
+    tf.summary.scalar("Training Accuracy", train_acc_tf)
+    val_acc_tf = tf.placeholder(tf.float32)
+    tf.summary.scalar("Validation Accuracy", val_acc_tf)
     dists_out = SiameseNet()(x);
     loss_vector_calc = hinge_embed_loss_func(y, dists_out);
     loss_scalar_calc = tf.reduce_mean(loss_vector_calc)
+    # save loss output for tensorboard:
+    tf.summary.scalar('loss', loss_scalar_calc)
     optimizer = tf.train.AdamOptimizer(learning_rate)
     grads = optimizer.compute_gradients(loss_scalar_calc)
     capped_grads = [(tf.clip_by_value(grad, -1.0, 1.0), var) for grad, var in grads]
     train_op = optimizer.apply_gradients(capped_grads)
+    merged = tf.summary.merge_all()
 
 def mine_one_batch(session_ref, dataset_ref):
     X_unmined = np.zeros((0, 4), dtype="uint32")
@@ -284,8 +295,10 @@ def mine_one_batch(session_ref, dataset_ref):
 # TODO: look into is_training flag, usually passed into feed_dict
 # Run computational graph
 with tf.Session() as sess:
+    tb_train_writer = tf.summary.FileWriter(tb_sum_dir, sess.graph)
     sess.run(tf.global_variables_initializer())
     step = 1;
+    val_acc_stats = {'acc': 0.0}
     plt.ion()
     ct = 0;
     
@@ -309,16 +322,25 @@ with tf.Session() as sess:
         
         # ======= TRAINING =======
         for X_mined, y_mined in mined_batches:
-            feed_dict = {x: training_dset.fetchImageData(X_mined), y: y_mined }
+            feed_dict = {x: training_dset.fetchImageData(X_mined),
+                         y: y_mined}
             
             # check accuracy for this step
             dists_out_np = sess.run(dists_out, feed_dict=feed_dict)
             train_stats = check_accuracy(dists_out_np, y_mined)
-
+ 
             # do training step
-            loss_output, _ = sess.run([loss_scalar_calc, train_op], feed_dict=feed_dict)
+            feed_dict = {x: training_dset.fetchImageData(X_mined),
+                        y: y_mined,
+                        train_acc_tf: 100.0*train_stats['acc'],
+                        val_acc_tf: 100.0*val_acc_stats['acc']}
 
-            # training progress log
+            loss_output, summary, _ = sess.run([loss_scalar_calc, merged, train_op], feed_dict=feed_dict)
+            tb_train_writer.add_summary(summary)
+            tb_train_writer.flush()
+
+            # ======= LOGGING =======
+            # print out to console
             print 'Step', ('%6s' % step), '  |  ', \
                     'Loss', ('%6s' % str(np.around(loss_output, 3))), '  |  ', \
                     'Training Acc', (('%6s' % np.around(100.0*train_stats['acc'], 1)) + '%'), '  |  ', \

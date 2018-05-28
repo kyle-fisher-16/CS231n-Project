@@ -185,17 +185,17 @@ class SiameseNet(tf.keras.Model):
     def __init__(self):
         super(SiameseNet, self).__init__()
         initializer = tf.initializers.random_normal(stddev=init_stddev)
-        self.conv1 = tf.layers.Conv2D(filters = 32, kernel_size = (7, 7), strides = (2, 2), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
-        self.avg_pool1 = tf.layers.AveragePooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
-        self.max_pool1 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
+        self.conv1 = tf.layers.Conv2D(filters = 32, kernel_size = (7, 7), strides = (2, 2), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        self.avg_pool1 = tf.layers.AveragePooling2D(pool_size = (2, 2), padding = "SAME", strides = (1, 1))
+        self.max_pool1 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "SAME", strides = (1, 1))
 
-        self.conv2 = tf.layers.Conv2D(filters = 64, kernel_size = (6, 6), strides = (3, 3), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
-        self.avg_pool2 = tf.layers.AveragePooling2D(pool_size = (3, 3), padding = "SAME", strides = (3, 3))
-        self.max_pool2 = tf.layers.MaxPooling2D(pool_size = (3, 3), padding = "SAME", strides = (3, 3))
+        self.conv2 = tf.layers.Conv2D(filters = 64, kernel_size = (6, 6), strides = (3, 3), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        self.avg_pool2 = tf.layers.AveragePooling2D(pool_size = (3, 3), padding = "SAME", strides = (1, 1))
+        self.max_pool2 = tf.layers.MaxPooling2D(pool_size = (3, 3), padding = "SAME", strides = (1, 1))
 
-        self.conv3 = tf.layers.Conv2D(filters = 128, kernel_size = (5, 5), strides = (4, 4), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
-        self.avg_pool3 = tf.layers.AveragePooling2D(pool_size = (4, 4), padding = "SAME", strides = (4, 4))
-        self.max_pool3 = tf.layers.MaxPooling2D(pool_size = (4, 4), padding = "SAME", strides = (4, 4))
+        self.conv3 = tf.layers.Conv2D(filters = 128, kernel_size = (4, 4), strides = (4, 4), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        self.avg_pool3 = tf.layers.AveragePooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
+        self.max_pool3 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
 
     
     # apply convnet; operates only on one of the left/right channels at a time.
@@ -205,34 +205,43 @@ class SiameseNet(tf.keras.Model):
         
         # LAYER 1
         x_out = self.conv1(x)
+        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape after conv1", summarize=10)
         if (pooling_type=='l2'):
             x_out = self.apply_L2_Pool(x_out, self.avg_pool1)
         elif (pooling_type=='max'):
             x_out = self.max_pool1(x_out)
+        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape before gauss subnorm1", summarize=10)
         x_out = self.apply_guassian_subnorm(x_out)
-        
-        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape")
-        
+        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape after gauss subnorm1", summarize=10)
+
         # LAYER 2
         x_out = self.conv2(x_out)
+        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape after conv2", summarize=10)
         if (pooling_type=='l2'):
             x_out = self.apply_L2_Pool(x_out, self.avg_pool2)
         elif (pooling_type=='max'):
             x_out = self.max_pool2(x_out)
+        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape before gauss subnorm2", summarize=10)
         x_out = self.apply_guassian_subnorm(x_out)
-        
+        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape after gauss subnorm2", summarize=10)
+
         # LAYER 3
         x_out = self.conv3(x_out)
+        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape after conv3", summarize=10)
         if (pooling_type=='l2'):
             x_out = self.apply_L2_Pool(x_out, self.avg_pool3)
         elif (pooling_type=='max'):
             x_out = self.max_pool3(x_out)
-        
+        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape after pool3", summarize=10)
+
+
         # flatten because at the end we want a single descriptor per input
         x_out = tf.layers.flatten(x_out);
+        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape final", summarize=10)
+
 
         return x_out;
-    
+
     
     # spatial guassian subtractive normalization w/ 5x5xFxF kernel
     def apply_guassian_subnorm(self, x_in):
@@ -253,12 +262,12 @@ class SiameseNet(tf.keras.Model):
         # for conv2d, we need the dims to be ordered (batch_sz, img_w, img_h, channel)
         xL = tf.transpose(xL, [0, 2, 3, 1])
         
-        xL_subnormed = self.apply_guassian_subnorm(xL);
+#        xL_subnormed = self.apply_guassian_subnorm(xL);
 #
 #        xR = tf.transpose(xR, [0, 2, 3, 1])
 #
 #        # Convnet
-#        xL = self.apply_convnet(xL)
+        xL = self.apply_convnet(xL)
 #        xR = self.apply_convnet(xR)
 #
 #        # Slightly perturb one of these so they can't be identical
@@ -269,7 +278,7 @@ class SiameseNet(tf.keras.Model):
 #        dist_sq = tf.multiply(dist_sq, dist_sq);
 #        dist_sq = tf.reduce_sum(dist_sq, axis=1)#, keepdims=True);
 #        dist = tf.sqrt(dist_sq);
-        return xL_subnormed
+        return xL
 
 # ====== TRAINING ======
 # Construct computational graph

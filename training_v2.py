@@ -184,17 +184,18 @@ class SiameseNet(tf.keras.Model):
     def __init__(self):
         super(SiameseNet, self).__init__()
         initializer = tf.initializers.random_normal(stddev=init_stddev)
-        self.conv1 = tf.layers.Conv2D(filters = 32, kernel_size = (7, 7), strides = (2, 2), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
-        self.avg_pool1 = tf.layers.AveragePooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
-        self.max_pool1 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "SAME", strides = (2, 2))
+        self.conv1 = tf.layers.Conv2D(filters = 32, kernel_size = (7, 7), strides = (2, 2), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
 
-        self.conv2 = tf.layers.Conv2D(filters = 64, kernel_size = (6, 6), strides = (3, 3), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
-        self.avg_pool2 = tf.layers.AveragePooling2D(pool_size = (3, 3), padding = "SAME", strides = (3, 3))
-        self.max_pool2 = tf.layers.MaxPooling2D(pool_size = (3, 3), padding = "SAME", strides = (3, 3))
-
-        self.conv3 = tf.layers.Conv2D(filters = 128, kernel_size = (5, 5), strides = (4, 4), padding = "SAME", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
-        self.avg_pool3 = tf.layers.AveragePooling2D(pool_size = (4, 4), padding = "SAME", strides = (4, 4))
-        self.max_pool3 = tf.layers.MaxPooling2D(pool_size = (4, 4), padding = "SAME", strides = (4, 4))
+        self.avg_pool1 = tf.layers.AveragePooling2D(pool_size = (2, 2), padding = "VALID", strides = (1, 1))
+        self.max_pool1 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "VALID", strides = (1, 1))
+        
+        self.conv2 = tf.layers.Conv2D(filters = 64, kernel_size = (6, 6), strides = (3, 3), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        self.avg_pool2 = tf.layers.AveragePooling2D(pool_size = (3, 3), padding = "VALID", strides = (1, 1))
+        self.max_pool2 = tf.layers.MaxPooling2D(pool_size = (3, 3), padding = "VALID", strides = (1, 1))
+        
+        self.conv3 = tf.layers.Conv2D(filters = 128, kernel_size = (4, 4), strides = (4, 4), padding = "VALID", activation = tf.nn.tanh, use_bias = False, kernel_initializer = initializer)
+        self.avg_pool3 = tf.layers.AveragePooling2D(pool_size = (2, 2), padding = "VALID", strides = (2, 2))
+        self.max_pool3 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "VALID", strides = (2, 2))
 
     
     # apply convnet; operates only on one of the left/right channels at a time.
@@ -204,21 +205,26 @@ class SiameseNet(tf.keras.Model):
         
         # LAYER 1
         x_out = self.conv1(x)
+        paddings = tf.constant([[0,0],[1,0],[1,0], [0,0]])
+        x_out = tf.pad(x_out, paddings, "SYMMETRIC")
         if (pooling_type=='l2'):
             x_out = self.apply_L2_Pool(x_out, self.avg_pool1)
         elif (pooling_type=='max'):
             x_out = self.max_pool1(x_out)
         x_out = self.apply_guassian_subnorm(x_out)
-        
-        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape")
-        
+
         # LAYER 2
         x_out = self.conv2(x_out)
+#        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape", summarize=10)
+        paddings = tf.constant([[0,0],[1,1],[1,1], [0,0]])
+        x_out = tf.pad(x_out, paddings, "SYMMETRIC")
         if (pooling_type=='l2'):
             x_out = self.apply_L2_Pool(x_out, self.avg_pool2)
         elif (pooling_type=='max'):
             x_out = self.max_pool2(x_out)
         x_out = self.apply_guassian_subnorm(x_out)
+
+
         
         # LAYER 3
         x_out = self.conv3(x_out)
@@ -295,8 +301,10 @@ def mine_one_batch(session_ref, dataset_ref):
     loss_unmined = np.zeros((0,), dtype="float32")
     for i in range(mining_ratio):
         try:
+            print 'dataset_ref.next() @ i', i
             X_batch, y_batch, pct_complete = dataset_ref.next()
         except StopIteration:
+            print 'return mine_one_batch'
             return None, None, None;
         feed_dict = {x: dataset_ref.fetchImageData(X_batch), y: y_batch }
         
@@ -352,8 +360,10 @@ with tf.Session() as sess:
         print 'Mining...'
         mined_batches = [] # set of mined batches
         while True:
+            print 'start mine_one_batch'
             X_batch, y_batch, pct_complete = mine_one_batch(sess, training_dset)
             if X_batch is None:
+                print 'BREAK'
                 break;
             print str(np.around(pct_complete, 1)) + '% mined'
             mined_batches.append((X_batch, y_batch))

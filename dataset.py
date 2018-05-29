@@ -97,7 +97,7 @@ class Dataset(object):
     # indices are an Nx4 array.
     def fetchImageData(self, batch_idx):
         # TODO: optimize for performance
-        out_imgs = np.zeros((len(batch_idx), 2, 64, 64), dtype="uint8")
+        out_imgs = np.zeros((len(batch_idx), 2, 64, 64), dtype="float32")
         ct = 0;
         for idx in batch_idx:
             # left patch
@@ -125,7 +125,8 @@ class Dataset(object):
             out_imgs[ct, 1, :, :] = right_patch;
             
             ct += 1;
-        
+        out_imgs -= 127
+        out_imgs /= 127
         return out_imgs[0:ct] # TODO: fix the skipped y-idc
 
     # generate indices for a negative example

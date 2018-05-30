@@ -28,7 +28,7 @@ num_filters_conv1 = int(os.getenv('CS231N_NUM_FILTERS_CONV1', 32))
 num_filters_conv2 = int(os.getenv('CS231N_NUM_FILTERS_CONV2', 64))
 num_filters_conv3 = DESCRIPTOR_SZ
 conv_connectivity = int(os.getenv('CS231N_CONV_CONNECTIVITY', 8)) # the number of input channels that a sparse conv depends on
-use_sparsity = bool(os.getenv('CS231N_USE_SPARSITY', False))
+use_sparsity = bool(os.getenv('CS231N_USE_SPARSITY', True))
 matching_threshold = float(os.getenv('CS231N_MATCHING_THRESHOLD', 0.75))
 
 # Check input args

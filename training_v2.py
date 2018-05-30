@@ -24,6 +24,10 @@ learning_rate = float(os.getenv('CS231N_LEARNING_RATE', 5e-5))
 pct_validation = float(os.getenv('CS231N_PCT_VALIDATION', 10.0))
 pooling_type = str(os.getenv('CS231N_POOLING_TYPE', 'l2')).lower() # l2 or max
 init_stddev = float(os.getenv('CS231N_INIT_STDDEV', 0.5))
+num_filters_conv1 = int(os.getenv('CS231N_NUM_FILTERS_CONV1', 32))
+num_filters_conv2 = int(os.getenv('CS231N_NUM_FILTERS_CONV2', 64))
+use_sparsity = bool(os.getenv('CS231N_USE_SPARSITY', TRUE))
+
 
 if (not (pooling_type=='l2' or pooling_type=='max')):
     raise ValueError('Environment variable CS231N_POOLING_TYPE must be "l2" or "max"');
@@ -178,19 +182,67 @@ def apply_guassian_subnorm_ch(x):
     return result;
 
 
+def generate_model_connections(num_connections, num_input_layers, num_output_layers):
+    in_layer_idxs = np.array((num_output_layers,num_connections))
+    for i in range(0,num_output_layers):
+        connections = np.sort(np.random.choice(range(0,num_input_layers),num_connections, replace=False))
+        in_layer_idxs[i,:] = connections
+    return in_layer_idxs;
+
+def get_slices(input, connect_layer_idxs):
+    sliced_input = tf.slice(input, connect_layer_idxs[0], 1)
+    for i in range(1, connect_layer_idxs.shape[0]):
+        next_slice = tf.slice(input, connect_layer_idxs[i],1)
+        sliced_input = tf.concat([sliced_input, next_slice],axis=0)
+    return sliced_input
+
+
+'''
+    this is used as the connection between conv layers, or between pooling/normalization and the next conv layer
+    #input is the tensor to be connected/usually input to the next conv layer
+    #num_connections is an integer for the number of filters used to generate a single filter in the next layer
+    #next_conv_layer_params is a dictionary with all the usually conv layer parameters. specifically
+        # 'filters' = number of output filters
+        # 'kernel_size' = kernel_size for conv2d
+        # 'strides' = strides for conv2d
+'''
+def apply_sparse_connects_ch(input, connections, conv_kernel_size, conv_stride):
+    
+    conv_1filt = tf.layers.Conv2D(filters = 1, kernel_size = conv_kernel_size, strides = conv_stride, padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+    
+    # input is (IMG_W, IMG_H, filts) (single image layer, batch-size=1)
+    
+    # x_reshaped becomes (filts, IMG_W, IMG_H)
+    input_reshape = tf.transpose(input, [2, 0, 1]);
+    
+    in_slice = get_slices(input_reshape, connections[0,:])
+    outlayers = conv_1filt(in_slice)
+    
+    num_out_filts = connections.shape[0]
+    for i in range(0,num_out_filts):
+        # need to slice input ... to map input connections to single output layer
+        in_slice = get_slices(input_reshape, connections[i,:])
+        out_layer_i = conv_1filt(in_slice)
+        # now need to stack the out layers back together...
+        outlayers = tf.concat([outlayers, out_layer_i], axis=0)
+
+    outlayers = tf.transpose(outlayers, [1,2,0])
+
+    return outlayers
+
 
 class SiameseNet(tf.keras.Model):
 
     def __init__(self):
         super(SiameseNet, self).__init__()
         initializer = tf.initializers.random_normal(stddev=init_stddev)
-        self.conv1 = tf.layers.Conv2D(filters = 32, kernel_size = (7, 7), strides = (2, 2), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        self.conv1 = tf.layers.Conv2D(filters = num_filters_conv1, kernel_size = (7, 7), strides = (2, 2), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
         
 
         self.avg_pool1 = tf.layers.AveragePooling2D(pool_size = (2, 2), padding = "VALID", strides = (1, 1))
         self.max_pool1 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "VALID", strides = (1, 1))
         
-        self.conv2 = tf.layers.Conv2D(filters = 64, kernel_size = (6, 6), strides = (3, 3), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        self.conv2 = tf.layers.Conv2D(filters = num_filters_conv2, kernel_size = (6, 6), strides = (3, 3), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
         self.avg_pool2 = tf.layers.AveragePooling2D(pool_size = (3, 3), padding = "VALID", strides = (1, 1))
         self.max_pool2 = tf.layers.MaxPooling2D(pool_size = (3, 3), padding = "VALID", strides = (1, 1))
         
@@ -207,6 +259,8 @@ class SiameseNet(tf.keras.Model):
         # LAYER 1
 #        x = tf.Print(x, [tf.nn.moments(x[:,:,:,0], [0,1,2])], message="input image mean and std", summarize=10)
 
+        if use_sparsity:
+            x_out = self.apply_sparse_connects(x)
         x_out = self.conv1(x)
 #        x_out = tf.Print(x_out, [tf.nn.moments(x_out[:,:,:,0], [0,1,2])], message="conv1 mean and std", summarize=10)
 
@@ -240,9 +294,13 @@ class SiameseNet(tf.keras.Model):
         
         # flatten because at the end we want a single descriptor per input
         x_out = tf.layers.flatten(x_out);
+#        x_out = tf.Print(x_out, [tf.shape(x_out)], message="dimension of final output", summarize=10)
+
 
         return x_out;
-    
+
+    def apply_sparse_connects(self, x_in):
+        return tf.map_fn(apply_sparse_connects_ch, x_in)
     
     # spatial guassian subtractive normalization w/ 5x5xFxF kernel
     def apply_guassian_subnorm(self, x_in):

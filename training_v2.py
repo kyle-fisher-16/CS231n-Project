@@ -6,13 +6,13 @@ import h5py
 from dataset import Dataset
 from constants import GaussianKernel5x5
 import matplotlib.pyplot as plt
-
+from helpers import apply_guassian_subnorm_ch, apply_sparse_connected_conv, generate_model_connections
 
 
 # Global Constants
-IMG_W = 64;
-IMG_H = 64;
-
+IMG_W = 64
+IMG_H = 64
+DESCRIPTOR_SZ = 128
 
 # ====== HYPERPARAMS ======
 PLOT_BATCH = bool(os.getenv('CS231N_PLOT_BATCH', False)); # whether or not to plot the batch distances
@@ -26,13 +26,15 @@ pooling_type = str(os.getenv('CS231N_POOLING_TYPE', 'l2')).lower() # l2 or max
 init_stddev = float(os.getenv('CS231N_INIT_STDDEV', 0.5))
 num_filters_conv1 = int(os.getenv('CS231N_NUM_FILTERS_CONV1', 32))
 num_filters_conv2 = int(os.getenv('CS231N_NUM_FILTERS_CONV2', 64))
-use_sparsity = bool(os.getenv('CS231N_USE_SPARSITY', TRUE))
+num_filters_conv3 = DESCRIPTOR_SZ
+conv_connectivity = int(os.getenv('CS231N_CONV_CONNECTIVITY', 8)) # the number of input channels that a sparse conv depends on
+use_sparsity = bool(os.getenv('CS231N_USE_SPARSITY', True))
 
-
+# Check input args
 if (not (pooling_type=='l2' or pooling_type=='max')):
     raise ValueError('Environment variable CS231N_POOLING_TYPE must be "l2" or "max"');
 
-
+# Display the params at stdout
 print
 print '===== ENVIRONMENT VARIABLES ====='
 print 'Plotting Enabled:', PLOT_BATCH
@@ -50,14 +52,80 @@ print
 data = h5py.File('data/liberty.h5', 'r')
 #training_dset = Dataset(data, batch_size=batch_sz, max_dataset_size=3000);
 
-# ===== TB SUMMARY DIR ======
-tb_sum_dir = 'results/network/'
-
 # ====== SETUP ======
+# tensorboard
+tb_sum_dir = 'results/network/'
+# plotting
 if PLOT_BATCH:
     plot_batch_fig, plot_batch_ax = plt.subplots(1,1)
     plt.ion()
     plt.show()
+
+# ====== PLOTTING ======
+def plot_batch(d, y_true):
+    dist_max = 3; # don't draw points after this distance.
+    
+    N = len(y_true);
+    dists = np.asarray(d).reshape((-1))
+    dists = np.minimum(dists, np.ones(dists.shape)*dist_max);
+    
+    x_data = np.zeros((N,));
+    y_data = np.zeros((N,))
+    
+    color_data = []
+    
+    for i in range(N):
+        x_data[i] = dists[i];
+        y_data[i] = float(i) / float(N-1);
+        if y_true[i] > 0.5: # matching
+            color_data.append('g');
+        else:
+            color_data.append('r');
+
+    # draw the plot
+    global plot_batch_ax,plot_batch_fig;
+    plot_batch_ax.clear()
+    plot_batch_ax.scatter(x=x_data, y=y_data, c=color_data)
+    plt.xlim(0, dist_max);
+    plt.ylim(0, 1);
+    plot_batch_fig.canvas.draw()
+    plt.pause(0.0001)
+
+# ====== ACCURACY MEASUREMENT ======
+def check_accuracy(dists_out_np, y_true):
+    stats = {}
+    
+    dists = np.asarray(dists_out_np).reshape((-1))
+    
+    d = 0.5; # thresh distance
+    match_correct = np.sum((dists<d)&(y_true==1))
+    nomatch_correct = np.sum((dists>=d)&(y_true==0))
+    acc = (match_correct + nomatch_correct)/(np.float(len(y_true)))
+    
+    if PLOT_BATCH:
+        plot_batch(dists, y_true)
+    
+    stats['acc'] = acc;
+    stats['avg_dist'] = np.mean(dists);
+    return stats
+
+# ====== VAL ACCURACY ======
+def get_val_acc(sess_ref, dset_ref):
+    # X_valset and y_valset should be lists of np.arrays
+    X_valset = dset_ref.val_dataset[0]
+    y_valset = dset_ref.val_dataset[1]
+    all_dists = np.zeros((0,))
+    all_y_true = np.zeros((0,))
+    for i in range(0, len(X_valset)):
+        feed_dict = {x: dset_ref.fetchImageData(X_valset[i]), y: y_valset[i] }
+        
+        # check accuracy for this step
+        dists_out_np = sess_ref.run(dists_out, feed_dict=feed_dict)
+        all_dists = np.concatenate((all_dists, dists_out_np))
+        all_y_true = np.concatenate((all_y_true, y_valset[i]))
+    val_acc_stats = check_accuracy(all_dists, all_y_true)
+    return val_acc_stats
+
 
 # ====== LOSS FUNCTION ======
 def hinge_embed_loss_func(y_true, dist):
@@ -85,168 +153,48 @@ def hinge_embed_loss_func(y_true, dist):
     
     # add the two losses
     loss_val = tf.add(match_term, nonmatch_term);
-#    loss_val = tf.reduce_mean(loss_val)
 
     return loss_val;
 
-def plot_batch(d, y_true):
-    dist_max = 3; # don't draw points after this distance.
-    
-    N = len(y_true);
-    dists = np.asarray(d).reshape((-1))
-    dists = np.minimum(dists, np.ones(dists.shape)*dist_max);
-    
-    x_data = np.zeros((N,));
-    y_data = np.zeros((N,))
-    
-    color_data = []
-
-    for i in range(N):
-        x_data[i] = dists[i];
-        y_data[i] = float(i) / float(N-1);
-        if y_true[i] > 0.5: # matching
-            color_data.append('g');
-        else:
-            color_data.append('r');
-
-    # draw the plot
-    global plot_batch_ax,plot_batch_fig;
-    plot_batch_ax.clear()
-    plot_batch_ax.scatter(x=x_data, y=y_data, c=color_data)
-    plt.xlim(0, dist_max);
-    plt.ylim(0, 1);
-    plot_batch_fig.canvas.draw()
-    plt.pause(0.0001)
-
-
-def check_accuracy(dists_out_np, y_true):
-    stats = {}
-    
-    dists = np.asarray(dists_out_np).reshape((-1))
-
-    d = 0.5; # thresh distance
-    match_correct = np.sum((dists<d)&(y_true==1))
-    nomatch_correct = np.sum((dists>=d)&(y_true==0))
-    acc = (match_correct + nomatch_correct)/(np.float(len(y_true)))
-
-    if PLOT_BATCH:
-        plot_batch(dists, y_true)
-    
-    stats['acc'] = acc;
-    stats['avg_dist'] = np.mean(dists);
-    return stats
-
-def get_val_acc(sess_ref, dset_ref):
-    # X_valset and y_valset should be lists of np.arrays
-    X_valset = dset_ref.val_dataset[0]
-    y_valset = dset_ref.val_dataset[1]
-    all_dists = np.zeros((0,))
-    all_y_true = np.zeros((0,))
-    for i in range(0, len(X_valset)):
-        feed_dict = {x: dset_ref.fetchImageData(X_valset[i]), y: y_valset[i] }
-    
-        # check accuracy for this step
-        dists_out_np = sess_ref.run(dists_out, feed_dict=feed_dict)
-        all_dists = np.concatenate((all_dists, dists_out_np))
-        all_y_true = np.concatenate((all_y_true, y_valset[i]))
-    val_acc_stats = check_accuracy(all_dists, all_y_true)
-    return val_acc_stats
-
-
-# this is a vanilla tf function which applys gaussian subnorm
-def apply_guassian_subnorm_ch(x):
-    
-    # x is (IMG_W, IMG_H, filts)
-    
-    # x_reshaped becomes (filts, IMG_W, IMG_H)
-    x_reshaped = tf.transpose(x, [2, 0, 1]);
-    
-    # sh is (filts, IMG_W, IMG_H)
-    sh = tf.shape(x_reshaped);
-    
-    # x_reshaped becomes (filts, IMG_W, IMG_H, 1)
-    x_reshaped = tf.reshape(x_reshaped, (sh[0], sh[1], sh[2], 1));
-    
-    paddings = tf.constant([[0,0],[2,2],[2,2], [0,0]])
-    x_padded = tf.pad(x_reshaped, paddings, "SYMMETRIC")
-    
-    # apply the filter kernel
-    global GaussianKernel5x5;
-    result = x_reshaped - tf.nn.conv2d(x_padded, GaussianKernel5x5, strides=(1, 1, 1, 1), padding="VALID");
-    
-    # result shape is now (filts, IMG_W, IMG_H, 1). need to fix.
-    # make result be (filts, IMG_W, IMG_H)
-    result = tf.reshape(result, sh)
-    result = tf.transpose(result, [1, 2, 0]);
-    
-    return result;
-
-
-def generate_model_connections(num_connections, num_input_layers, num_output_layers):
-    in_layer_idxs = np.array((num_output_layers,num_connections))
-    for i in range(0,num_output_layers):
-        connections = np.sort(np.random.choice(range(0,num_input_layers),num_connections, replace=False))
-        in_layer_idxs[i,:] = connections
-    return in_layer_idxs;
-
-def get_slices(input, connect_layer_idxs):
-    sliced_input = tf.slice(input, connect_layer_idxs[0], 1)
-    for i in range(1, connect_layer_idxs.shape[0]):
-        next_slice = tf.slice(input, connect_layer_idxs[i],1)
-        sliced_input = tf.concat([sliced_input, next_slice],axis=0)
-    return sliced_input
-
-
-'''
-    this is used as the connection between conv layers, or between pooling/normalization and the next conv layer
-    #input is the tensor to be connected/usually input to the next conv layer
-    #num_connections is an integer for the number of filters used to generate a single filter in the next layer
-    #next_conv_layer_params is a dictionary with all the usually conv layer parameters. specifically
-        # 'filters' = number of output filters
-        # 'kernel_size' = kernel_size for conv2d
-        # 'strides' = strides for conv2d
-'''
-def apply_sparse_connects_ch(input, connections, conv_kernel_size, conv_stride):
-    
-    conv_1filt = tf.layers.Conv2D(filters = 1, kernel_size = conv_kernel_size, strides = conv_stride, padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
-    
-    # input is (IMG_W, IMG_H, filts) (single image layer, batch-size=1)
-    
-    # x_reshaped becomes (filts, IMG_W, IMG_H)
-    input_reshape = tf.transpose(input, [2, 0, 1]);
-    
-    in_slice = get_slices(input_reshape, connections[0,:])
-    outlayers = conv_1filt(in_slice)
-    
-    num_out_filts = connections.shape[0]
-    for i in range(0,num_out_filts):
-        # need to slice input ... to map input connections to single output layer
-        in_slice = get_slices(input_reshape, connections[i,:])
-        out_layer_i = conv_1filt(in_slice)
-        # now need to stack the out layers back together...
-        outlayers = tf.concat([outlayers, out_layer_i], axis=0)
-
-    outlayers = tf.transpose(outlayers, [1,2,0])
-
-    return outlayers
-
-
+# ====== NETWORK ======
 class SiameseNet(tf.keras.Model):
 
     def __init__(self):
         super(SiameseNet, self).__init__()
         initializer = tf.initializers.random_normal(stddev=init_stddev)
-        self.conv1 = tf.layers.Conv2D(filters = num_filters_conv1, kernel_size = (7, 7), strides = (2, 2), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
         
-
+        # ====== LAYER 1 ======
+        self.conv1 = tf.layers.Conv2D(filters = num_filters_conv1, kernel_size = (7, 7), strides = (2, 2), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
         self.avg_pool1 = tf.layers.AveragePooling2D(pool_size = (2, 2), padding = "VALID", strides = (1, 1))
         self.max_pool1 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "VALID", strides = (1, 1))
         
-        self.conv2 = tf.layers.Conv2D(filters = num_filters_conv2, kernel_size = (6, 6), strides = (3, 3), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        # ====== LAYER 2 ======
+        layer2_kernel_size = (6, 6)
+        layer2_strides = (3, 3)
+        # FULL CONV
+        self.conv2_fully_connected = tf.layers.Conv2D(filters = num_filters_conv2, kernel_size = layer2_kernel_size, strides = layer2_strides, padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        # SPARSE CONV
+        self.conv2_conns = generate_model_connections(conv_connectivity, num_filters_conv1, num_filters_conv2)
+        self.conv2_sparse = []
+        for i in range(num_filters_conv2):
+            conv_layer = tf.layers.Conv2D(filters = 1, kernel_size = layer2_kernel_size, strides = layer2_strides, padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+            self.conv2_sparse.append(conv_layer)
+        # POOLING
         self.avg_pool2 = tf.layers.AveragePooling2D(pool_size = (3, 3), padding = "VALID", strides = (1, 1))
         self.max_pool2 = tf.layers.MaxPooling2D(pool_size = (3, 3), padding = "VALID", strides = (1, 1))
         
-        self.conv3 = tf.layers.Conv2D(filters = 128, kernel_size = (4, 4), strides = (4, 4), padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        # ====== LAYER 3 ======
+        layer3_kernel_size = (4, 4)
+        layer3_strides = (3, 3)
+        # FULL CONV
+        self.conv3_fully_connected = tf.layers.Conv2D(filters = num_filters_conv3, kernel_size = layer3_kernel_size, strides = layer3_strides, padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+        # SPARSE CONV
+        self.conv3_conns = generate_model_connections(conv_connectivity, num_filters_conv2, num_filters_conv3)
+        self.conv3_sparse = []
+        for i in range(num_filters_conv3):
+            conv_layer = tf.layers.Conv2D(filters = 1, kernel_size = layer3_kernel_size, strides = layer3_strides, padding = "VALID", activation = tf.nn.tanh, use_bias = True, kernel_initializer = initializer)
+            self.conv3_sparse.append(conv_layer)
+        # POOLING
         self.avg_pool3 = tf.layers.AveragePooling2D(pool_size = (2, 2), padding = "VALID", strides = (2, 2))
         self.max_pool3 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "VALID", strides = (2, 2))
 
@@ -254,16 +202,8 @@ class SiameseNet(tf.keras.Model):
     # apply convnet; operates only on one of the left/right channels at a time.
     def apply_convnet(self, x):
 
-        # CNN architecture
-        
         # LAYER 1
-#        x = tf.Print(x, [tf.nn.moments(x[:,:,:,0], [0,1,2])], message="input image mean and std", summarize=10)
-
-        if use_sparsity:
-            x_out = self.apply_sparse_connects(x)
         x_out = self.conv1(x)
-#        x_out = tf.Print(x_out, [tf.nn.moments(x_out[:,:,:,0], [0,1,2])], message="conv1 mean and std", summarize=10)
-
         paddings = tf.constant([[0,0],[1,0],[1,0], [0,0]])
         x_out = tf.pad(x_out, paddings, "SYMMETRIC")
         if (pooling_type=='l2'):
@@ -273,8 +213,10 @@ class SiameseNet(tf.keras.Model):
         x_out = self.apply_guassian_subnorm(x_out)
 
         # LAYER 2
-        x_out = self.conv2(x_out)
-#        x_out = tf.Print(x_out, [tf.shape(x_out)], message="x_out shape", summarize=10)
+        if use_sparsity:
+            x_out = apply_sparse_connected_conv(x_out, self.conv2_sparse, self.conv2_conns);
+        else: # no sparsity
+            x_out = self.conv2_fully_connected(x_out)
         paddings = tf.constant([[0,0],[1,1],[1,1], [0,0]])
         x_out = tf.pad(x_out, paddings, "SYMMETRIC")
         if (pooling_type=='l2'):
@@ -283,10 +225,11 @@ class SiameseNet(tf.keras.Model):
             x_out = self.max_pool2(x_out)
         x_out = self.apply_guassian_subnorm(x_out)
 
-
-        
         # LAYER 3
-        x_out = self.conv3(x_out)
+        if use_sparsity:
+            x_out = apply_sparse_connected_conv(x_out, self.conv3_sparse, self.conv3_conns);
+        else: # no sparsity
+            x_out = self.conv3_fully_connected(x_out)
         if (pooling_type=='l2'):
             x_out = self.apply_L2_Pool(x_out, self.avg_pool3)
         elif (pooling_type=='max'):
@@ -295,8 +238,6 @@ class SiameseNet(tf.keras.Model):
         # flatten because at the end we want a single descriptor per input
         x_out = tf.layers.flatten(x_out);
 #        x_out = tf.Print(x_out, [tf.shape(x_out)], message="dimension of final output", summarize=10)
-
-
         return x_out;
 
     def apply_sparse_connects(self, x_in):
@@ -335,6 +276,7 @@ class SiameseNet(tf.keras.Model):
         dist_sq = tf.reduce_sum(dist_sq, axis=1)#, keepdims=True);
         dist = tf.sqrt(dist_sq);
         return dist
+
 
 # ====== TRAINING ======
 # Construct computational graph

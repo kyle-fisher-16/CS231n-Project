@@ -10,4 +10,4 @@ export CS231N_PCT_VALIDATION=10.0
 export CS231N_POOLING_TYPE=l2
 export CS231N_INIT_STDDEV=0.05
 
-python training_v3.py
+python training_v2.py

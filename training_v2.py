@@ -294,10 +294,12 @@ with tf.device('/cpu:0'):
     loss_scalar_calc = tf.reduce_mean(loss_vector_calc)
     # save loss output for tensorboard:
     tf.summary.scalar('loss', loss_scalar_calc)
-    optimizer = tf.train.AdamOptimizer(learning_rate)
+    Gstep = tf.Variable(0, trainable=False)
+    learning_rate = tf.train.exponential_decay(0.01, Gstep, 10000, 10)
+    optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9)
     grads = optimizer.compute_gradients(loss_scalar_calc)
     capped_grads = [(tf.clip_by_value(grad, -1.0, 1.0), var) for grad, var in grads]
-    train_op = optimizer.apply_gradients(capped_grads)
+    train_op = optimizer.apply_gradients(capped_grads, global_step=Gstep)
     merged = tf.summary.merge_all()
 
 def mine_one_batch(session_ref, dataset_ref):

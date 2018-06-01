@@ -99,23 +99,26 @@ def update_threshold(dists_out_np, y_true, matching_threshold, thresh_vel):
     dists = np.asarray(dists_out_np).reshape((-1))
     offset = 0.01;
     # to do: initialize and track matching threshold
-    offset_threshold = matching_threshold + offset
-    # get accuracy at current threshold
-    match_correct = np.sum((dists < matching_threshold) & (y_true == 1))
-    nomatch_correct = np.sum((dists >= matching_threshold) & (y_true == 0))
-    acc = (match_correct + nomatch_correct) / (np.float(len(y_true)))
-    # get acuracy at perturbed threshold
-    off_match_correct = np.sum((dists < offset_threshold) & (y_true == 1))
-    off_nomatch_correct = np.sum((dists >= offset_threshold) & (y_true == 0))
-    off_acc = (off_match_correct + off_nomatch_correct) / (np.float(len(y_true)))
+    upper_threshold = matching_threshold + offset
+    lower_threshold = matching_threshold - offset
+    # get accuracies at thresholds
+    acc = calcAcc(dists, matching_threshold, y_true)
+    upper_acc = calcAcc(dists, upper_threshold, y_true)
+    lower_acc = calcAcc(dists, lower_threshold, y_true)
     # if accuracy is different enough from offset accuracy
-    if abs(off_acc - acc) > 0.0001:
+    if (((upper_acc - acc) > 0.0001) or ((lower_acc - acc) > 0.0001)):
         # update threshold vel in direction of accuracy increase
-        thresh_vel += (off_acc - acc) * 0.1 - 0.0001 * thresh_vel
+        dAcc, dsgn = max((upper_acc - acc, 1), (lower_acc - acc, -1))
+        thresh_vel += dAcc * dsgn * 0.1 - 0.0001 * thresh_vel
         matching_threshold += thresh_vel * 0.1
     # update threshold
     return matching_threshold, thresh_vel
 
+def calcAcc(dists, thresh, y):
+    match_correct = np.sum((dists < thresh) & (y == 1))
+    nomatch_correct = np.sum((dists >= thresh) & (y == 0))
+    return (match_correct + nomatch_correct) / (np.float(len(y)))
+    
 '''
 def compute_best_threshold(dists_out_np, y_true):
     dists = np.asarray(dists_out_np).reshape((-1))

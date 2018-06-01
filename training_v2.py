@@ -29,7 +29,7 @@ num_filters_conv2 = int(os.getenv('CS231N_NUM_FILTERS_CONV2', 64))
 num_filters_conv3 = DESCRIPTOR_SZ
 conv_connectivity = int(os.getenv('CS231N_CONV_CONNECTIVITY', 8)) # the number of input channels that a sparse conv depends on
 use_sparsity = bool(os.getenv('CS231N_USE_SPARSITY', True))
-matching_threshold = float(os.getenv('CS231N_MATCHING_THRESHOLD', 0.75))
+#matching_threshold = float(os.getenv('CS231N_MATCHING_THRESHOLD', 0.75))
 
 # Check input args
 if (not (pooling_type=='l2' or pooling_type=='max')):
@@ -47,7 +47,7 @@ print 'Number of Epochs:', num_epochs
 print 'Learning Rate:', learning_rate
 print 'Percent for Validation:', (str(pct_validation) + '%')
 print 'Initialization Std. Dev.:', init_stddev
-print 'Initial Matching Threshold.:', matching_threshold
+#print 'Initial Matching Threshold.:', matching_threshold
 print
 
 # ====== LOAD DATA ======
@@ -64,7 +64,7 @@ if PLOT_BATCH:
     plt.show()
 
 
-def plot_batch(d, y_true):
+def plot_batch(d, y_true, thresh):
     dist_max = 3; # don't draw points after this distance.
     
     N = len(y_true);
@@ -85,19 +85,40 @@ def plot_batch(d, y_true):
             color_data.append('r');
 
     # draw the plot
-    global plot_batch_ax,plot_batch_fig,matching_threshold;
+    global plot_batch_ax,plot_batch_fig;
     plot_batch_ax.clear()
     plot_batch_ax.scatter(x=x_data, y=y_data, c=color_data)
     plt.xlim(0, dist_max);
     plt.ylim(0, 1);
-    plt.plot([matching_threshold, matching_threshold], [0.0, 1.0], color='k', linestyle='-', linewidth=2)
+    plt.plot([thresh, thresh], [0.0, 1.0], color='k', linestyle='-', linewidth=2)
     plot_batch_fig.canvas.draw()
     plt.pause(0.0001)
 
 # ====== OPTIMAL THRESHOLD ESTIMATION ======
+def update_threshold(dists_out_np, y_true, matching_threshold, thresh_vel):
+    dists = np.asarray(dists_out_np).reshape((-1))
+    offset = 0.01;
+    # to do: initialize and track matching threshold
+    offset_threshold = matching_threshold + offset
+    # get accuracy at current threshold
+    match_correct = np.sum((dists < matching_threshold) & (y_true == 1))
+    nomatch_correct = np.sum((dists >= matching_threshold) & (y_true == 0))
+    acc = (match_correct + nomatch_correct) / (np.float(len(y_true)))
+    # get acuracy at perturbed threshold
+    off_match_correct = np.sum((dists < offset_threshold) & (y_true == 1))
+    off_nomatch_correct = np.sum((dists >= offset_threshold) & (y_true == 0))
+    off_acc = (off_match_correct + off_nomatch_correct) / (np.float(len(y_true)))
+    # if accuracy is different enough from offset accuracy
+    if abs(off_acc - acc) > 0.0001:
+        # update threshold vel in direction of accuracy increase
+        thresh_vel += (off_acc - acc) * 0.1 - 0.0001 * thresh_vel
+        matching_threshold += thresh_vel * 0.1
+    # update threshold
+    return matching_threshold, thresh_vel
+
+'''
 def compute_best_threshold(dists_out_np, y_true):
     dists = np.asarray(dists_out_np).reshape((-1))
-    
     # check in a small neighborhood of the current best threshold
     offsets = np.asarray(range(-5, 6, 1), dtype="float32") / 100.0
     thresh_set = matching_threshold + offsets;
@@ -114,20 +135,22 @@ def compute_best_threshold(dists_out_np, y_true):
             best_acc = acc
     print 'best_thresh', best_thresh
     return best_thresh
+'''
 
 # ====== ACCURACY MEASUREMENT ======
-def check_accuracy(dists_out_np, y_true):
+def check_accuracy(dists_out_np, y_true, thresh):
     stats = {}
     
     dists = np.asarray(dists_out_np).reshape((-1))
     
-    d = 0.5; # thresh distance
+    '''d = 0.5; # thresh distance'''
+    d = thresh
     match_correct = np.sum((dists<d)&(y_true==1))
     nomatch_correct = np.sum((dists>=d)&(y_true==0))
     acc = (match_correct + nomatch_correct)/(np.float(len(y_true)))
     
     if PLOT_BATCH:
-        plot_batch(dists, y_true)
+        plot_batch(dists, y_true, thresh)
     
     stats['acc'] = acc;
     stats['avg_dist'] = np.mean(dists);
@@ -147,8 +170,10 @@ def get_val_acc(sess_ref, dset_ref):
         dists_out_np = sess_ref.run(dists_out, feed_dict=feed_dict)
         all_dists = np.concatenate((all_dists, dists_out_np))
         all_y_true = np.concatenate((all_y_true, y_valset[i]))
-    best_threshold = compute_best_threshold(all_dists, all_y_true)
-    val_acc_stats = check_accuracy(all_dists, all_y_true)
+    '''best_threshold = compute_best_threshold(all_dists, all_y_true)'''
+    dset_ref.thresh, dset_ref.thresh_v = update_threshold(all_dists, all_y_true, dset_ref.thresh, dset_ref.thresh_v)
+    '''val_acc_stats = check_accuracy(all_dists, all_y_true)'''
+    val_acc_stats = check_accuracy(all_dists, all_y_true, dset_ref.thresh)
     return val_acc_stats
 
 
@@ -381,10 +406,16 @@ with tf.Session() as sess:
     
     for epoch_num in range(1,num_epochs+1, 1):
         print 'BEGINNING EPOCH #' + str(epoch_num)
-        
+        if epoch_num > 1:
+            thresh = training_dset.thresh
+            print "Threshold: ", thresh
+            thresh_v = training_dset.thresh_v
 
         # use 10% of dset for validation
         training_dset = Dataset(data,batch_sz, pct_for_val=pct_validation, max_dataset_size=dataset_limit);
+        if epoch_num > 1:
+            training_dset.thresh = thresh
+            training_dset.thresh_v = thresh_v
         
         # ======= MINING =======
         print 'Mining...'
@@ -404,7 +435,8 @@ with tf.Session() as sess:
             
             # check accuracy for this step
             dists_out_np = sess.run(dists_out, feed_dict=feed_dict)
-            train_stats = check_accuracy(dists_out_np, y_mined)
+            '''train_stats = check_accuracy(dists_out_np, y_mined)'''
+            train_stats = check_accuracy(dists_out_np, y_mined, training_dset.thresh)
  
             # do training step
             feed_dict = {x: training_dset.fetchImageData(X_mined),

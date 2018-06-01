@@ -15,12 +15,13 @@ IMG_H = 64
 DESCRIPTOR_SZ = 128
 
 # ====== HYPERPARAMS ======
+do_restore_model = bool(os.getenv('CS231N_RESTORE_MODEL', False))
 PLOT_BATCH = bool(os.getenv('CS231N_PLOT_BATCH', False)); # whether or not to plot the batch distances
 dataset_limit = int(os.getenv('CS231N_DATASET_LIMIT', 100000000)); # limit the input dataset (for debugging)
 mining_ratio = int(os.getenv('CS231N_MINING_RATIO', 8))
 batch_sz = int(os.getenv('CS231N_BATCH_SZ', 128))
 num_epochs = int(os.getenv('CS231N_NUM_EPOCHS', 1000))
-learning_rate = float(os.getenv('CS231N_LEARNING_RATE', 5e-5))
+override_learning_rate = float(os.getenv('CS231N_OVERRIDE_LEARNING_RATE', 0.01))
 pct_validation = float(os.getenv('CS231N_PCT_VALIDATION', 10.0))
 pooling_type = str(os.getenv('CS231N_POOLING_TYPE', 'l2')).lower() # l2 or max
 init_stddev = float(os.getenv('CS231N_INIT_STDDEV', 0.5))
@@ -29,7 +30,8 @@ num_filters_conv2 = int(os.getenv('CS231N_NUM_FILTERS_CONV2', 64))
 num_filters_conv3 = DESCRIPTOR_SZ
 conv_connectivity = int(os.getenv('CS231N_CONV_CONNECTIVITY', 8)) # the number of input channels that a sparse conv depends on
 use_sparsity = bool(os.getenv('CS231N_USE_SPARSITY', True))
-#matching_threshold = float(os.getenv('CS231N_MATCHING_THRESHOLD', 0.75))
+saved_models_dir = str(os.getenv('CS231N_SAVED_MODELS_DIR', 'results/model/')).lower()
+saved_model_fn = str(os.getenv('CS231N_SAVED_MODEL_FILENAME', 'sess.ckpt')).lower()
 
 # Check input args
 if (not (pooling_type=='l2' or pooling_type=='max')):
@@ -44,9 +46,11 @@ print 'Mining Ratio:', mining_ratio
 print 'Batch Size:', batch_sz
 print 'Pooling Type:', pooling_type
 print 'Number of Epochs:', num_epochs
-print 'Learning Rate:', learning_rate
+print 'Learning Rate:', override_learning_rate
 print 'Percent for Validation:', (str(pct_validation) + '%')
 print 'Initialization Std. Dev.:', init_stddev
+print 'model save location:', saved_models_dir
+print 'filename of saved model:', saved_model_fn
 #print 'Initial Matching Threshold.:', matching_threshold
 print
 
@@ -57,6 +61,9 @@ data = h5py.File('data/liberty.h5', 'r')
 # ====== SETUP ======
 # tensorboard
 tb_sum_dir = 'results/network/'
+
+
+
 # plotting
 if PLOT_BATCH:
     plot_batch_fig, plot_batch_ax = plt.subplots(1,1)
@@ -209,8 +216,13 @@ def hinge_embed_loss_func(y_true, dist):
 
     return loss_val;
 
+
+
 # ====== NETWORK ======
 class SiameseNet(tf.keras.Model):
+    
+    def get_config(self):
+        return {}
 
     def __init__(self):
         super(SiameseNet, self).__init__()
@@ -250,6 +262,7 @@ class SiameseNet(tf.keras.Model):
         # POOLING
         self.avg_pool3 = tf.layers.AveragePooling2D(pool_size = (2, 2), padding = "VALID", strides = (2, 2))
         self.max_pool3 = tf.layers.MaxPooling2D(pool_size = (2, 2), padding = "VALID", strides = (2, 2))
+
 
     
     # apply convnet; operates only on one of the left/right channels at a time.
@@ -342,13 +355,14 @@ with tf.device('/cpu:0'):
     tf.summary.scalar("Training Accuracy", train_acc_tf)
     val_acc_tf = tf.placeholder(tf.float32)
     tf.summary.scalar("Validation Accuracy", val_acc_tf)
-    dists_out = SiameseNet()(x);
+    snet = SiameseNet()
+    dists_out = snet(x);
     loss_vector_calc = hinge_embed_loss_func(y, dists_out);
     loss_scalar_calc = tf.reduce_mean(loss_vector_calc)
     # save loss output for tensorboard:
     tf.summary.scalar('loss', loss_scalar_calc)
     Gstep = tf.Variable(0, trainable=False)
-    learning_rate = tf.train.exponential_decay(0.01, Gstep, 10000, 10)
+    learning_rate = tf.train.exponential_decay(override_learning_rate, Gstep, 10000, 10)
     optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9)
     grads = optimizer.compute_gradients(loss_scalar_calc)
     capped_grads = [(tf.clip_by_value(grad, -1.0, 1.0), var) for grad, var in grads]
@@ -402,10 +416,20 @@ def mine_one_batch(session_ref, dataset_ref):
 with tf.Session() as sess:
     tb_train_writer = tf.summary.FileWriter(tb_sum_dir, sess.graph)
     sess.run(tf.global_variables_initializer())
+    
+    # ======= RESTORE MODEL? =======
+    if do_restore_model:
+        model_path = saved_models_dir+saved_model_fn
+        print 'Restoring from', model_path, '...'
+        tf.train.Saver().restore(sess,  model_path)
+        print 'Done.'
+
+    # Stats, plottig, etc
     step = 1;
     val_acc_stats = {'acc': 0.0}
     plt.ion()
     ct = 0;
+    best_val_acc = 0.0
     
     for epoch_num in range(1,num_epochs+1, 1):
         print 'BEGINNING EPOCH #' + str(epoch_num)
@@ -464,6 +488,11 @@ with tf.Session() as sess:
 
         # check validation accuracy
         val_acc_stats = get_val_acc(sess, training_dset)
+        if val_acc_stats['acc'] > best_val_acc:
+            print "Saving model..."
+            best_val_acc = val_acc_stats['acc']
+            ret = tf.train.Saver().save(sess, saved_models_dir+saved_model_fn)
+            print "Saved model to", ret
         
         print 'END EPOCH #' + str(epoch_num), '  |  ',\
             'Validation Acc', (('%6s' % np.around(100.0*val_acc_stats['acc'], 1)) + '%')

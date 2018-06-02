@@ -15,7 +15,7 @@ export CS231N_INIT_STDDEV=0.25
 #export CS231N_CONV_CONNECTIVITY=
 export CS231N_USE_SPARSITY=True
 export CS231N_SAVED_MODELS_DIR=results/model/
-export CS231N_SAVED_MODEL_FILENAME=sess_full_gpu_06-01.ckpt
+export CS231N_SAVED_MODEL_PREFIX=sess
 export CS231N_SAVED_STATS_DIR=results/train_stats_06-01/
 export CS231N_DEVICE_NAME=gpu
 

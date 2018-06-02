@@ -6,6 +6,28 @@ import h5py
 from dataset import Dataset
 from constants import GaussianKernel5x5
 import matplotlib.pyplot as plt
+import datetime
+
+def save_stats(filename, epoch, val_acc, best_val_acc, current_step, threshold, avg_pos_dist, avg_neg_dist):
+    try:
+        text_file = open(filename, "w")
+        memos = []
+        memos.append(str(datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y")))
+        memos.append("Epoch: " + str(epoch))
+        memos.append("Val Acc: " + str(val_acc))
+        memos.append("Record Val Acc: " + str(best_val_acc))
+        memos.append("Current Step #: " + str(current_step))
+        memos.append("Threshold: " + str(threshold))
+        memos.append("Avg Distance (Positives): " + str(avg_pos_dist))
+        memos.append("Avg Distance (Negatives): " + str(avg_neg_dist))
+        
+        for memo in memos:
+            text_file.write(memo + "\n")
+        
+        
+        text_file.close()
+    except:
+        print "save_stats(): Failed to write", filename
 
 # this is a vanilla tf function which applys gaussian subnorm
 def apply_guassian_subnorm_ch(x):

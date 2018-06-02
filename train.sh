@@ -16,5 +16,6 @@ export CS231N_INIT_STDDEV=0.25
 export CS231N_USE_SPARSITY=True
 export CS231N_SAVED_MODELS_DIR=results/model/
 export CS231N_SAVED_MODEL_FILENAME=sess_custom.ckpt
+export CS231N_SAVED_STATS_DIR=results/train_stats/
 
 python training_v2.py

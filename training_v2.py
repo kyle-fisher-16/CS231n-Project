@@ -361,22 +361,22 @@ with tf.device(device_name):
     y = tf.placeholder(tf.float32, [None])
     # place holders for graph stuff??
     train_acc_tf = tf.placeholder(tf.float32)
-    tf.summary.scalar("Training Accuracy", train_acc_tf)
+    #tf.summary.scalar("Training Accuracy", train_acc_tf)
     val_acc_tf = tf.placeholder(tf.float32)
-    tf.summary.scalar("Validation Accuracy", val_acc_tf)
+    #tf.summary.scalar("Validation Accuracy", val_acc_tf)
     snet = SiameseNet()
     dists_out = snet(x);
     loss_vector_calc = hinge_embed_loss_func(y, dists_out);
     loss_scalar_calc = tf.reduce_mean(loss_vector_calc)
     # save loss output for tensorboard:
-    tf.summary.scalar('loss', loss_scalar_calc)
+    #tf.summary.scalar('loss', loss_scalar_calc)
     Gstep = tf.Variable(0.0, trainable=False)
     learning_rate = tf.train.exponential_decay(override_learning_rate, Gstep, 10000, 10)
     optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9)
     grads = optimizer.compute_gradients(loss_scalar_calc)
     capped_grads = [(tf.clip_by_value(grad, -1.0, 1.0), var) for grad, var in grads]
     train_op = optimizer.apply_gradients(capped_grads, global_step=Gstep)
-    merged = tf.summary.merge_all()
+    #merged = tf.summary.merge_all()
 
 def mine_one_batch(session_ref, dataset_ref):
     X_unmined = np.zeros((0, 4), dtype="uint32")
@@ -480,9 +480,9 @@ with tf.Session() as sess:
                         train_acc_tf: 100.0*train_stats['acc'],
                         val_acc_tf: 100.0*val_acc_stats['acc']}
 
-            loss_output, summary, _ = sess.run([loss_scalar_calc, merged, train_op], feed_dict=feed_dict)
-            tb_train_writer.add_summary(summary)
-            tb_train_writer.flush()
+            loss_output, _ = sess.run([loss_scalar_calc, train_op], feed_dict=feed_dict)
+            #tb_train_writer.add_summary(summary)
+            #tb_train_writer.flush()
 
             # ======= LOGGING =======
             # print out to console

@@ -1,10 +1,10 @@
 rm -rf results/network/*
 
 export CS231N_RESTORE_MODEL=False
-export CS231N_PLOT_BATCH=True
-export CS231N_DATASET_LIMIT=100
-export CS231N_MINING_RATIO=1
-export CS231N_BATCH_SZ=32
+export CS231N_PLOT_BATCH=False
+#export CS231N_DATASET_LIMIT
+export CS231N_MINING_RATIO=8
+export CS231N_BATCH_SZ=128
 export CS231N_NUM_EPOCHS=1000
 #export CS231N_OVERRIDE_LEARNING_RATE=5e-2
 export CS231N_PCT_VALIDATION=10.0
@@ -15,8 +15,8 @@ export CS231N_INIT_STDDEV=0.25
 #export CS231N_CONV_CONNECTIVITY=
 export CS231N_USE_SPARSITY=True
 export CS231N_SAVED_MODELS_DIR=results/model/
-export CS231N_SAVED_MODEL_FILENAME=sess_custom.ckpt
-export CS231N_SAVED_STATS_DIR=results/train_stats/
-export CS231N_DEVICE_NAME=cpu
+export CS231N_SAVED_MODEL_FILENAME=sess_full_gpu_06-01.ckpt
+export CS231N_SAVED_STATS_DIR=results/train_stats_06-01/
+export CS231N_DEVICE_NAME=gpu
 
 python training_v2.py

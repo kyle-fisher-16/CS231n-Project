@@ -429,13 +429,14 @@ def mine_one_batch(session_ref, dataset_ref):
 # Run computational graph
 with tf.Session() as sess:
     tb_train_writer = tf.summary.FileWriter(tb_sum_dir, sess.graph)
-    sess.run(tf.global_variables_initializer())
-    
+
     # ======= RESTORE MODEL? =======
     if restore_model_path != None:
         print 'Restoring from', restore_model_path, '...'
         tf.train.Saver().restore(sess,  restore_model_path)
         print 'Done.'
+    else: 
+        sess.run(tf.global_variables_initializer())
 
     # Stats, plottig, etc
     step = 1;

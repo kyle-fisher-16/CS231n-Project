@@ -167,12 +167,17 @@ def check_accuracy(dists_out_np, y_true, thresh):
         plot_batch(dists, y_true, thresh)
     
     avg_pos_dist = np.mean(dists[y_true==1])
+    var_pos_dist = np.var(dists[y_true==1])
+
     avg_neg_dist = np.mean(dists[y_true==0])
+    var_neg_dist = np.var(dists[y_true==0])
     
     stats['acc'] = acc;
     stats['avg_dist'] = np.mean(dists);
     stats['avg_pos_dist'] = avg_pos_dist;
     stats['avg_neg_dist'] = avg_neg_dist;
+    stats['var_pos_dist'] = var_pos_dist;
+    stats['var_neg_dist'] = var_neg_dist;
     return stats
 
 # ====== VAL ACCURACY ======
@@ -510,7 +515,9 @@ with tf.Session() as sess:
                    current_step=step,
                    threshold=training_dset.thresh,
                    avg_pos_dist=val_acc_stats['avg_pos_dist'],
-                   avg_neg_dist=val_acc_stats['avg_neg_dist']);
+                   avg_neg_dist=val_acc_stats['avg_neg_dist'],
+                   var_pos_dist=val_acc_stats['var_pos_dist'],
+                   var_neg_dist=val_acc_stats['var_neg_dist']);
         
         print 'END EPOCH #' + str(epoch_num), '  |  ',\
             'Validation Acc', (('%6s' % np.around(100.0*val_acc_stats['acc'], 1)) + '%')

@@ -8,7 +8,7 @@ from constants import GaussianKernel5x5
 import matplotlib.pyplot as plt
 import datetime
 
-def save_stats(filename, epoch, val_acc, best_val_acc, current_step, threshold, avg_pos_dist, avg_neg_dist):
+def save_stats(filename, epoch, val_acc, best_val_acc, current_step, threshold, avg_pos_dist, avg_neg_dist, var_pos_dist, var_neg_dist):
     try:
         text_file = open(filename, "w")
         memos = []
@@ -20,6 +20,8 @@ def save_stats(filename, epoch, val_acc, best_val_acc, current_step, threshold, 
         memos.append("Threshold: " + str(threshold))
         memos.append("Avg Distance (Positives): " + str(avg_pos_dist))
         memos.append("Avg Distance (Negatives): " + str(avg_neg_dist))
+        memos.append("Variance of Distances (Positives): " + str(var_pos_dist))
+        memos.append("Variance of Distances (Negatives): " + str(var_neg_dist))
         
         for memo in memos:
             text_file.write(memo + "\n")

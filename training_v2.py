@@ -370,7 +370,7 @@ with tf.device(device_name):
     loss_scalar_calc = tf.reduce_mean(loss_vector_calc)
     # save loss output for tensorboard:
     tf.summary.scalar('loss', loss_scalar_calc)
-    Gstep = tf.Variable(0, trainable=False)
+    Gstep = tf.Variable(0.0, trainable=False)
     learning_rate = tf.train.exponential_decay(override_learning_rate, Gstep, 10000, 10)
     optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9)
     grads = optimizer.compute_gradients(loss_scalar_calc)

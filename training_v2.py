@@ -33,6 +33,7 @@ use_sparsity = str(os.getenv('CS231N_USE_SPARSITY', True)).lower().startswith("t
 saved_models_dir = str(os.getenv('CS231N_SAVED_MODELS_DIR', 'results/model/')).lower()
 saved_model_fn = str(os.getenv('CS231N_SAVED_MODEL_FILENAME', 'sess.ckpt')).lower()
 saves_stats_dir = str(os.getenv('CS231N_SAVED_STATS_DIR', 'results/train_stats/')).lower()
+device_name = '/'+str(os.getenv('CS231N_DEVICE_NAME', 'cpu')).lower()+':0'
 
 # Check input args
 if (not (pooling_type=='l2' or pooling_type=='max')):
@@ -53,6 +54,7 @@ print 'Percent for Validation:', (str(pct_validation) + '%')
 print 'Initialization Std. Dev.:', init_stddev
 print 'model save location:', saved_models_dir
 print 'filename of saved model:', saved_model_fn
+print 'device:', device_name
 #print 'Initial Matching Threshold.:', matching_threshold
 print
 
@@ -354,7 +356,7 @@ class SiameseNet(tf.keras.Model):
 # ====== TRAINING ======
 # Construct computational graph
 tf.reset_default_graph()
-with tf.device('/cpu:0'):
+with tf.device(device_name):
     x = tf.placeholder(tf.float32, [None, 2, IMG_W, IMG_H])
     y = tf.placeholder(tf.float32, [None])
     # place holders for graph stuff??

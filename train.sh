@@ -1,6 +1,6 @@
 rm -rf results/network/*
 
-export CS231N_RESTORE_MODEL=False
+#export CS231N_RESTORE_MODEL_PATH=results/models/
 export CS231N_PLOT_BATCH=False
 #export CS231N_DATASET_LIMIT
 export CS231N_MINING_RATIO=8

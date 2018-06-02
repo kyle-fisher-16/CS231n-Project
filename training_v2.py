@@ -15,7 +15,7 @@ IMG_H = 64
 DESCRIPTOR_SZ = 128
 
 # ====== HYPERPARAMS ======
-do_restore_model = str(os.getenv('CS231N_RESTORE_MODEL', False)).lower().startswith("t")
+restore_model_path = str(os.getenv('CS231N_RESTORE_MODEL_PATH', None))
 PLOT_BATCH = str(os.getenv('CS231N_PLOT_BATCH', False)).lower().startswith("t"); # whether or not to plot the batch distances
 dataset_limit = int(os.getenv('CS231N_DATASET_LIMIT', 100000000)); # limit the input dataset (for debugging)
 mining_ratio = int(os.getenv('CS231N_MINING_RATIO', 8))
@@ -31,7 +31,7 @@ num_filters_conv3 = DESCRIPTOR_SZ
 conv_connectivity = int(os.getenv('CS231N_CONV_CONNECTIVITY', 8)) # the number of input channels that a sparse conv depends on
 use_sparsity = str(os.getenv('CS231N_USE_SPARSITY', True)).lower().startswith("t")
 saved_models_dir = str(os.getenv('CS231N_SAVED_MODELS_DIR', 'results/model/')).lower()
-saved_model_fn = str(os.getenv('CS231N_SAVED_MODEL_FILENAME', 'sess.ckpt')).lower()
+saved_model_prefix = str(os.getenv('CS231N_SAVED_MODEL_PREFIX', 'sess')).lower()
 saves_stats_dir = str(os.getenv('CS231N_SAVED_STATS_DIR', 'results/train_stats/')).lower()
 device_name = '/'+str(os.getenv('CS231N_DEVICE_NAME', 'cpu')).lower()+':0'
 
@@ -42,7 +42,7 @@ if (not (pooling_type=='l2' or pooling_type=='max')):
 # Display the params at stdout
 print
 print '===== ENVIRONMENT VARIABLES ====='
-print 'Restore Model:', do_restore_model
+print 'Restore Model:', restore_model_path
 print 'Plotting Enabled:', PLOT_BATCH
 print 'Dataset Limit:', dataset_limit, 'examples'
 print 'Mining Ratio:', mining_ratio
@@ -53,7 +53,7 @@ print 'Learning Rate:', override_learning_rate
 print 'Percent for Validation:', (str(pct_validation) + '%')
 print 'Initialization Std. Dev.:', init_stddev
 print 'model save location:', saved_models_dir
-print 'filename of saved model:', saved_model_fn
+print 'prefix of saved model:', saved_model_prefix
 print 'device:', device_name
 #print 'Initial Matching Threshold.:', matching_threshold
 print
@@ -427,10 +427,9 @@ with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     
     # ======= RESTORE MODEL? =======
-    if do_restore_model:
-        model_path = saved_models_dir+saved_model_fn
-        print 'Restoring from', model_path, '...'
-        tf.train.Saver().restore(sess,  model_path)
+    if restore_model_path != None:
+        print 'Restoring from', restore_model_path, '...'
+        tf.train.Saver().restore(sess,  restore_model_path)
         print 'Done.'
 
     # Stats, plottig, etc
@@ -498,10 +497,10 @@ with tf.Session() as sess:
         # check validation accuracy
         val_acc_stats = get_val_acc(sess, training_dset)
         if val_acc_stats['acc'] > best_val_acc:
-            print "Saving model..."
             best_val_acc = val_acc_stats['acc']
-            ret = tf.train.Saver().save(sess, saved_models_dir+saved_model_fn)
-            print "Saved model to", ret
+        print "Saving model..."
+        ret = tf.train.Saver().save(sess, saved_models_dir + saved_model_prefix + '_' + str(epoch_num) + '.ckpt')
+        print "Saved model to", ret
         
         # ======= SAVE STATS TO FILE =======
         save_stats(saves_stats_dir+str(epoch_num)+".txt",

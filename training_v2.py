@@ -16,6 +16,7 @@ DESCRIPTOR_SZ = 128
 
 # ====== HYPERPARAMS ======
 restore_model_path = str(os.getenv('CS231N_RESTORE_MODEL_PATH', None))
+if restore_model_path == "None": restore_model_path = None
 PLOT_BATCH = str(os.getenv('CS231N_PLOT_BATCH', False)).lower().startswith("t"); # whether or not to plot the batch distances
 dataset_limit = int(os.getenv('CS231N_DATASET_LIMIT', 100000000)); # limit the input dataset (for debugging)
 mining_ratio = int(os.getenv('CS231N_MINING_RATIO', 8))
@@ -106,50 +107,27 @@ def plot_batch(d, y_true, thresh):
     plt.pause(0.0001)
 
 # ====== OPTIMAL THRESHOLD ESTIMATION ======
-def update_threshold(dists_out_np, y_true, matching_threshold, thresh_vel):
+def update_threshold(dists_out_np, y_true, matching_threshold):
+    # get distances
     dists = np.asarray(dists_out_np).reshape((-1))
-    offset = 0.01;
-    # to do: initialize and track matching threshold
-    upper_threshold = matching_threshold + offset
-    lower_threshold = matching_threshold - offset
-    # get accuracies at thresholds
-    acc = calcAcc(dists, matching_threshold, y_true)
-    upper_acc = calcAcc(dists, upper_threshold, y_true)
-    lower_acc = calcAcc(dists, lower_threshold, y_true)
-    # if accuracy is different enough from offset accuracy
-    if (((upper_acc - acc) > 0.0001) or ((lower_acc - acc) > 0.0001)):
-        # update threshold vel in direction of accuracy increase
-        dAcc, dsgn = max((upper_acc - acc, 1), (lower_acc - acc, -1))
-        thresh_vel += dAcc * dsgn * 0.1 - 0.0001 * thresh_vel
-        matching_threshold += thresh_vel * 0.1
-    # update threshold
-    return matching_threshold, thresh_vel
+    # make range of test thresholds
+    threshLst = [i * 0.0001 for i in range(4000, 10001)]
+    # initialize the validation accuracy to 0
+    bestAcc = 0
+    # initialize the threshold to 0
+    bestThresh = 0
+    # for each test threshold
+    for thresh in threshLst:
+        # determine the validation accuracy
+        currentAcc = calcAcc(dists, thresh, y_true)
+        # update best acc
+        bestAcc, bestThresh = max((bestAcc, bestThresh), (currentAcc, thresh))
+    return bestThresh
 
 def calcAcc(dists, thresh, y):
     match_correct = np.sum((dists < thresh) & (y == 1))
     nomatch_correct = np.sum((dists >= thresh) & (y == 0))
     return (match_correct + nomatch_correct) / (np.float(len(y)))
-    
-'''
-def compute_best_threshold(dists_out_np, y_true):
-    dists = np.asarray(dists_out_np).reshape((-1))
-    # check in a small neighborhood of the current best threshold
-    offsets = np.asarray(range(-5, 6, 1), dtype="float32") / 100.0
-    thresh_set = matching_threshold + offsets;
-    thresh_set = np.maximum(0.0, thresh_set) # clamp at 0.0
-    
-    best_acc = 0.5 # acc to beat.
-    best_thresh = matching_threshold
-    for d in thresh_set:
-        match_correct = np.sum((dists<d)&(y_true==1))
-        nomatch_correct = np.sum((dists>=d)&(y_true==0))
-        acc = (match_correct + nomatch_correct)/(np.float(len(y_true)))
-        if acc > best_acc:
-            best_thresh = d;
-            best_acc = acc
-    print 'best_thresh', best_thresh
-    return best_thresh
-'''
 
 # ====== ACCURACY MEASUREMENT ======
 def check_accuracy(dists_out_np, y_true, thresh):
@@ -195,7 +173,7 @@ def get_val_acc(sess_ref, dset_ref):
         all_dists = np.concatenate((all_dists, dists_out_np))
         all_y_true = np.concatenate((all_y_true, y_valset[i]))
     '''best_threshold = compute_best_threshold(all_dists, all_y_true)'''
-    dset_ref.thresh, dset_ref.thresh_v = update_threshold(all_dists, all_y_true, dset_ref.thresh, dset_ref.thresh_v)
+    dset_ref.thresh = update_threshold(all_dists, all_y_true, dset_ref.thresh)
     '''val_acc_stats = check_accuracy(all_dists, all_y_true)'''
     val_acc_stats = check_accuracy(all_dists, all_y_true, dset_ref.thresh)
     return val_acc_stats
@@ -449,13 +427,11 @@ with tf.Session() as sess:
         if epoch_num > 1:
             thresh = training_dset.thresh
             print "Threshold: ", thresh
-            thresh_v = training_dset.thresh_v
 
         # use 10% of dset for validation
         training_dset = Dataset(data,batch_sz, pct_for_val=pct_validation, max_dataset_size=dataset_limit);
         if epoch_num > 1:
             training_dset.thresh = thresh
-            training_dset.thresh_v = thresh_v
         
         # ======= MINING =======
         print 'Mining...'

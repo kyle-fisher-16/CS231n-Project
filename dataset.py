@@ -26,7 +26,6 @@ class Dataset(object):
     
         self.val_dataset = self.get_val_data(pct_for_val)
         self.thresh = 0.5
-        self.thresh_v = 0.0
 
     def __iter__(self):
         return self

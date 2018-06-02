@@ -6,7 +6,7 @@ import h5py
 from dataset import Dataset
 from constants import GaussianKernel5x5
 import matplotlib.pyplot as plt
-from helpers import apply_guassian_subnorm_ch, apply_sparse_connected_conv, generate_model_connections
+from helpers import apply_guassian_subnorm_ch, apply_sparse_connected_conv, generate_model_connections, save_stats
 
 
 # Global Constants
@@ -15,8 +15,8 @@ IMG_H = 64
 DESCRIPTOR_SZ = 128
 
 # ====== HYPERPARAMS ======
-do_restore_model = bool(os.getenv('CS231N_RESTORE_MODEL', False))
-PLOT_BATCH = bool(os.getenv('CS231N_PLOT_BATCH', False)); # whether or not to plot the batch distances
+do_restore_model = str(os.getenv('CS231N_RESTORE_MODEL', False)).lower().startswith("t")
+PLOT_BATCH = str(os.getenv('CS231N_PLOT_BATCH', False)).lower().startswith("t"); # whether or not to plot the batch distances
 dataset_limit = int(os.getenv('CS231N_DATASET_LIMIT', 100000000)); # limit the input dataset (for debugging)
 mining_ratio = int(os.getenv('CS231N_MINING_RATIO', 8))
 batch_sz = int(os.getenv('CS231N_BATCH_SZ', 128))
@@ -29,9 +29,10 @@ num_filters_conv1 = int(os.getenv('CS231N_NUM_FILTERS_CONV1', 32))
 num_filters_conv2 = int(os.getenv('CS231N_NUM_FILTERS_CONV2', 64))
 num_filters_conv3 = DESCRIPTOR_SZ
 conv_connectivity = int(os.getenv('CS231N_CONV_CONNECTIVITY', 8)) # the number of input channels that a sparse conv depends on
-use_sparsity = bool(os.getenv('CS231N_USE_SPARSITY', True))
+use_sparsity = str(os.getenv('CS231N_USE_SPARSITY', True)).lower().startswith("t")
 saved_models_dir = str(os.getenv('CS231N_SAVED_MODELS_DIR', 'results/model/')).lower()
 saved_model_fn = str(os.getenv('CS231N_SAVED_MODEL_FILENAME', 'sess.ckpt')).lower()
+saves_stats_dir = str(os.getenv('CS231N_SAVED_STATS_DIR', 'results/train_stats/')).lower()
 
 # Check input args
 if (not (pooling_type=='l2' or pooling_type=='max')):
@@ -40,6 +41,7 @@ if (not (pooling_type=='l2' or pooling_type=='max')):
 # Display the params at stdout
 print
 print '===== ENVIRONMENT VARIABLES ====='
+print 'Restore Model:', do_restore_model
 print 'Plotting Enabled:', PLOT_BATCH
 print 'Dataset Limit:', dataset_limit, 'examples'
 print 'Mining Ratio:', mining_ratio
@@ -162,8 +164,13 @@ def check_accuracy(dists_out_np, y_true, thresh):
     if PLOT_BATCH:
         plot_batch(dists, y_true, thresh)
     
+    avg_pos_dist = np.mean(dists[y_true==1])
+    avg_neg_dist = np.mean(dists[y_true==0])
+    
     stats['acc'] = acc;
     stats['avg_dist'] = np.mean(dists);
+    stats['avg_pos_dist'] = avg_pos_dist;
+    stats['avg_neg_dist'] = avg_neg_dist;
     return stats
 
 # ====== VAL ACCURACY ======
@@ -493,6 +500,16 @@ with tf.Session() as sess:
             best_val_acc = val_acc_stats['acc']
             ret = tf.train.Saver().save(sess, saved_models_dir+saved_model_fn)
             print "Saved model to", ret
+        
+        # ======= SAVE STATS TO FILE =======
+        save_stats(saves_stats_dir+str(epoch_num)+".txt",
+                   epoch=epoch_num,
+                   val_acc=val_acc_stats['acc'],
+                   best_val_acc=best_val_acc,
+                   current_step=step,
+                   threshold=training_dset.thresh,
+                   avg_pos_dist=val_acc_stats['avg_pos_dist'],
+                   avg_neg_dist=val_acc_stats['avg_neg_dist']);
         
         print 'END EPOCH #' + str(epoch_num), '  |  ',\
             'Validation Acc', (('%6s' % np.around(100.0*val_acc_stats['acc'], 1)) + '%')

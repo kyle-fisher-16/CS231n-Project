@@ -159,12 +159,12 @@ def check_accuracy(dists_out_np, y_true, thresh):
     return stats
 
 # ====== VAL ACCURACY ======
-def get_val_acc(sess_ref, dset_ref):
+def get_val_acc(sess_ref, dset_ref, val_csv_filename=None):
     # X_valset and y_valset should be lists of np.arrays
     X_valset = dset_ref.val_dataset[0]
     y_valset = dset_ref.val_dataset[1]
     all_dists = np.zeros((0,))
-    all_y_true = np.zeros((0,))
+    all_y_true = np.zeros((0,), dtype=np.int32)
     for i in range(0, len(X_valset)):
         feed_dict = {x: dset_ref.fetchImageData(X_valset[i]), y: y_valset[i] }
         
@@ -176,6 +176,9 @@ def get_val_acc(sess_ref, dset_ref):
     dset_ref.thresh = update_threshold(all_dists, all_y_true, dset_ref.thresh)
     '''val_acc_stats = check_accuracy(all_dists, all_y_true)'''
     val_acc_stats = check_accuracy(all_dists, all_y_true, dset_ref.thresh)
+    if val_csv_filename != None:
+        all_y_true = all_y_true.astype(np.int32)
+        np.savetxt(val_csv_filename, np.hstack((all_dists.reshape(-1,1), all_y_true.reshape(-1,1))))
     return val_acc_stats
 
 
@@ -477,7 +480,7 @@ with tf.Session() as sess:
             step += 1
 
         # check validation accuracy
-        val_acc_stats = get_val_acc(sess, training_dset)
+        val_acc_stats = get_val_acc(sess, training_dset, val_csv_filename=saves_stats_dir+str(epoch_num)+"_val.csv")
         if val_acc_stats['acc'] > best_val_acc:
             best_val_acc = val_acc_stats['acc']
         print "Saving model..."
@@ -494,7 +497,7 @@ with tf.Session() as sess:
                    avg_pos_dist=val_acc_stats['avg_pos_dist'],
                    avg_neg_dist=val_acc_stats['avg_neg_dist'],
                    var_pos_dist=val_acc_stats['var_pos_dist'],
-                   var_neg_dist=val_acc_stats['var_neg_dist']);
-        
+                   var_neg_dist=val_acc_stats['var_neg_dist']);        
+
         print 'END EPOCH #' + str(epoch_num), '  |  ',\
             'Validation Acc', (('%6s' % np.around(100.0*val_acc_stats['acc'], 1)) + '%')

@@ -19,4 +19,5 @@ export CS231N_SAVED_MODEL_PREFIX=sess
 export CS231N_SAVED_STATS_DIR=results/train_stats_06-01/
 export CS231N_DEVICE_NAME=gpu
 
+mkdir $CS231N_SAVED_STATS_DIR
 python training_v2.py

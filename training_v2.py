@@ -111,7 +111,7 @@ def update_threshold(dists_out_np, y_true, matching_threshold):
     # get distances
     dists = np.asarray(dists_out_np).reshape((-1))
     # make range of test thresholds
-    threshLst = [i * 0.0001 for i in range(4000, 10001)]
+    threshLst = [i * 0.0001 for i in range(0, 20001)]
     # initialize the validation accuracy to 0
     bestAcc = 0
     # initialize the threshold to 0

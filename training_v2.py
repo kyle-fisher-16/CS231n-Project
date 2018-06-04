@@ -368,6 +368,12 @@ def mine_one_batch(session_ref, dataset_ref):
     X_unmined = np.zeros((0, 4), dtype="uint32")
     y_unmined = np.zeros((0,), dtype="uint32")
     loss_unmined = np.zeros((0,), dtype="float32")
+    if mining_ratio == 1:
+        try:
+            X_batch, y_batch, pct_complete = dataset_ref.next()
+	    return X_batch, y_batch, pct_complete
+        except:
+            return None, None, None
     for i in range(mining_ratio):
         try:
             X_batch, y_batch, pct_complete = dataset_ref.next()
